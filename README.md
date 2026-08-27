@@ -24,7 +24,7 @@ its contents.
 
 ## Prerequisites
 
-- Google Chrome 148 or newer
+- Google Chrome 148+ for manual loading; Chrome for Testing or Chromium 148+ for `run-demo.sh`
 - Node.js 22 or newer (`run-demo.sh` uses pnpm 10 from `PATH` or bootstraps it through `npx`)
 - Rust 1.85 or newer
 
@@ -34,7 +34,7 @@ the page context. Native Messaging remains JSON and is base64-chunked only at th
 
 ## One-command demo
 
-On Google Chrome for Linux, run:
+On Linux, run:
 
 ```bash
 chmod +x run-demo.sh
@@ -42,9 +42,18 @@ chmod +x run-demo.sh
 ```
 
 The launcher installs pnpm dependencies, builds the WXT extension, builds and registers the Rust
-host, serves Forge on port 4173, and opens a fresh temporary Chrome profile with the unpacked
-extension loaded. Close that Chrome window or press `Ctrl+C` to stop the server. It does not require
-GTK, WebKit, Tauri, Python, or an external static-server package.
+host, serves Forge on port 4173, and opens a fresh temporary Chrome for Testing or Chromium profile
+with the unpacked extension loaded. It discovers compatible Playwright/Puppeteer browser caches or
+accepts `DEMO_CHROME_BIN=/path/to/chrome`. Close that browser window or press `Ctrl+C` to stop the
+server. It does not require GTK, WebKit, Tauri, Python, or an external static-server package.
+
+Because Chrome resolves user-level Native Messaging hosts relative to an overridden user-data
+directory, the launcher installs a pinned host manifest inside its disposable profile. Manual setup
+still installs to the browser's normal per-user configuration directory.
+
+Official branded Chrome removed command-line unpacked-extension loading in version 137. The runner
+therefore refuses to launch branded Chrome instead of silently opening an unprotected Forge page.
+For regular Google Chrome, use the manual `chrome://extensions` setup below.
 
 The unpacked extension carries a public development key so its ID is stable and the launcher can
 pin the exact Native Messaging `allowed_origin` automatically. The key is not a credential or a

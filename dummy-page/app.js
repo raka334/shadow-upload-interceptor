@@ -67,10 +67,32 @@ function applySecureIntentStatus(rawStatus) {
   }
 }
 
+function applyGuardState() {
+  if (document.documentElement.dataset.secureintentGuard !== 'active') return;
+  if (statusCard.dataset.status === 'waiting' || statusCard.dataset.status === 'unavailable') {
+    setStatus('allowed', 'Protected — waiting', 'SecureIntent local upload guard is active.');
+  }
+}
+
 new MutationObserver(() => {
   const status = document.documentElement.dataset.secureintentStatus;
   if (status) applySecureIntentStatus(status);
+  applyGuardState();
 }).observe(document.documentElement, {
   attributes: true,
-  attributeFilter: ['data-secureintent-status'],
+  attributeFilter: ['data-secureintent-status', 'data-secureintent-guard'],
 });
+
+applyGuardState();
+setTimeout(() => {
+  if (
+    document.documentElement.dataset.secureintentGuard !== 'active' &&
+    statusCard.dataset.status === 'waiting'
+  ) {
+    setStatus(
+      'unavailable',
+      'Protection unavailable',
+      'The SecureIntent extension did not load; uploads will not be scanned.',
+    );
+  }
+}, 800);

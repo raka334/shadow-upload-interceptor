@@ -248,6 +248,11 @@ h1 {
   box-shadow: 0 0 0 4px rgba(255, 109, 120, 0.12);
 }
 
+.status-card[data-status="unavailable"] .status-dot {
+  background: #ff6d78;
+  box-shadow: 0 0 0 4px rgba(255, 109, 120, 0.12);
+}
+
 .received-file {
   align-items: center;
   gap: 12px;
@@ -354,4 +359,3 @@ h1 {
     transition-duration: 0.01ms !important;
   }
 }
-

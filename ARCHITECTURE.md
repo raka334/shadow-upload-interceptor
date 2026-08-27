@@ -65,6 +65,12 @@ launcher derives Chrome's stable extension ID from that key and writes the match
 This public key is identity metadata, not an authentication secret; production identity comes from
 a signed Web Store package or enterprise-managed deployment.
 
+The automated launcher uses Chrome for Testing or Chromium because branded Chrome 137+ removed the
+`--load-extension` command-line path. It registers the host in that browser's specific Native
+Messaging directory and refuses branded Chrome rather than presenting an unprotected demo page.
+Because the runner supplies a disposable `--user-data-dir`, its host manifest is written into that
+profile's `NativeMessagingHosts` directory—the location Chrome actually resolves for that process.
+
 ## Native Messaging instead of a local server
 
 Native Messaging exposes no TCP listener. A web origin cannot probe or authenticate to the Rust

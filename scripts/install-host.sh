@@ -3,15 +3,29 @@ set -euo pipefail
 
 HOST_NAME="com.secureintent.shadow"
 EXTENSION_ID="${1:-}"
+BROWSER_FLAVOR="${2:-chrome}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 DAEMON_MANIFEST="${REPO_DIR}/daemon/Cargo.toml"
 BINARY="${REPO_DIR}/daemon/target/release/secureintent-shadow-host"
-HOST_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/google-chrome/NativeMessagingHosts"
+CONFIG_ROOT="${XDG_CONFIG_HOME:-${HOME}/.config}"
+
+case "${BROWSER_FLAVOR}" in
+  chrome) BROWSER_CONFIG_DIR="google-chrome" ;;
+  chrome-for-testing) BROWSER_CONFIG_DIR="google-chrome-for-testing" ;;
+  chromium) BROWSER_CONFIG_DIR="chromium" ;;
+  *)
+    echo "Unsupported browser flavor: ${BROWSER_FLAVOR}" >&2
+    echo "Expected chrome, chrome-for-testing, or chromium." >&2
+    exit 2
+    ;;
+esac
+
+HOST_DIR="${SHADOW_NATIVE_HOST_DIR:-${CONFIG_ROOT}/${BROWSER_CONFIG_DIR}/NativeMessagingHosts}"
 HOST_MANIFEST="${HOST_DIR}/${HOST_NAME}.json"
 
 if [[ ! "${EXTENSION_ID}" =~ ^[a-p]{32}$ ]]; then
-  echo "Usage: ./scripts/install-host.sh <32-character Chrome extension ID>" >&2
+  echo "Usage: ./scripts/install-host.sh <extension-id> [chrome|chrome-for-testing|chromium]" >&2
   echo "The ID must contain only letters a through p." >&2
   exit 2
 fi
@@ -42,7 +56,7 @@ node -e '
 
 node -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))' "${HOST_MANIFEST}"
 
-echo "Installed ${HOST_NAME} for Google Chrome."
+echo "Installed ${HOST_NAME} for ${BROWSER_FLAVOR}."
 echo "Manifest: ${HOST_MANIFEST}"
 echo "Binary:   ${BINARY}"
 echo "Next: restart Chrome, reopen http://localhost:4173, and drop testdata/block.pem."

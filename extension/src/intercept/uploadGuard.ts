@@ -59,6 +59,7 @@ function containsFiles(event: DragEvent): boolean {
 
 export function installUploadGuard(): () => void {
   let generation = 0;
+  document.documentElement.dataset.secureintentGuard = 'active';
 
   const processFile = async (file: File, input: HTMLInputElement, ownGeneration: number) => {
     notifyPage({ state: 'scanning', filename: file.name });
@@ -84,6 +85,8 @@ export function installUploadGuard(): () => void {
     const status: DemoStatus = { state: 'allowed', filename: file.name };
     if (result.reason === 'too_large') {
       status.detail = 'File exceeded the 8 MiB demo scan limit.';
+    } else if (result.failOpen) {
+      status.detail = `Local scanner unavailable (${result.reason ?? 'unknown'}); upload allowed.`;
     }
     notifyPage(status);
     if (!resumeIntoInput(input, file)) {
@@ -129,6 +132,7 @@ export function installUploadGuard(): () => void {
   window.addEventListener('drop', onDrop, true);
 
   return () => {
+    delete document.documentElement.dataset.secureintentGuard;
     window.removeEventListener('change', onChange, true);
     window.removeEventListener('dragover', onDragOver, true);
     window.removeEventListener('drop', onDrop, true);

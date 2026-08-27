@@ -8,9 +8,10 @@ BUILT_MANIFEST="${EXTENSION_OUTPUT}/manifest.json"
 DUMMY_PAGE_DIR="${SCRIPT_DIR}/dummy-page"
 DEMO_PORT="4173"
 DEMO_URL="http://localhost:${DEMO_PORT}"
-DEMO_CHROME_BIN="${DEMO_CHROME_BIN:-google-chrome}"
+DEMO_CHROME_BIN="${DEMO_CHROME_BIN:-}"
 PNPM_VERSION="10.28.2"
 MODE="run"
+BROWSER_FLAVOR="chrome"
 SERVER_PID=""
 CHROME_PID=""
 CHROME_PROFILE=""
@@ -27,8 +28,65 @@ Options:
   -h, --help      Show this help.
 
 Environment:
-  DEMO_CHROME_BIN  Chrome executable to launch (default: google-chrome).
+  DEMO_CHROME_BIN  Chrome for Testing or Chromium executable to launch.
 EOF
+}
+
+classify_browser() {
+  local version_output
+  version_output="$("${DEMO_CHROME_BIN}" --version 2>/dev/null || true)"
+
+  if [[ "${version_output}" == *"Chrome for Testing"* ]]; then
+    BROWSER_FLAVOR="chrome-for-testing"
+  elif [[ "${version_output}" == *"Chromium"* ]]; then
+    BROWSER_FLAVOR="chromium"
+  else
+    echo "The automatic demo requires Chrome for Testing or Chromium 148+." >&2
+    echo "Official Google Chrome 137+ ignores --load-extension, so it would open Forge unprotected." >&2
+    echo "Detected: ${version_output:-unknown browser}" >&2
+    echo "Set DEMO_CHROME_BIN to a compatible executable, or follow README's manual Chrome setup." >&2
+    exit 1
+  fi
+
+  if [[ ! "${version_output}" =~ ([0-9]+)\. ]] || (( BASH_REMATCH[1] < 148 )); then
+    echo "The extension requires browser version 148 or newer. Detected: ${version_output}" >&2
+    exit 1
+  fi
+}
+
+resolve_browser() {
+  local candidate
+
+  if [[ -n "${DEMO_CHROME_BIN}" && ! -x "${DEMO_CHROME_BIN}" ]] && command -v "${DEMO_CHROME_BIN}" >/dev/null 2>&1; then
+    DEMO_CHROME_BIN="$(command -v "${DEMO_CHROME_BIN}")"
+  fi
+
+  if [[ -z "${DEMO_CHROME_BIN}" ]]; then
+    for candidate in google-chrome-for-testing chromium chromium-browser; do
+      if command -v "${candidate}" >/dev/null 2>&1; then
+        DEMO_CHROME_BIN="$(command -v "${candidate}")"
+        break
+      fi
+    done
+  fi
+
+  if [[ -z "${DEMO_CHROME_BIN}" ]]; then
+    for candidate in \
+      "${HOME}"/.cache/ms-playwright/chromium-*/chrome-linux64/chrome \
+      "${HOME}"/.cache/puppeteer/chrome/*/chrome-linux64/chrome; do
+      if [[ -x "${candidate}" ]]; then
+        DEMO_CHROME_BIN="${candidate}"
+      fi
+    done
+  fi
+
+  if [[ -z "${DEMO_CHROME_BIN}" || ! -x "${DEMO_CHROME_BIN}" ]]; then
+    echo "Chrome for Testing or Chromium 148+ was not found." >&2
+    echo "Install one, set DEMO_CHROME_BIN, or use the README's manual Load unpacked steps." >&2
+    exit 1
+  fi
+
+  classify_browser
 }
 
 case "${1:-}" in
@@ -60,10 +118,8 @@ else
   exit 1
 fi
 
-if [[ "${MODE}" == "run" ]] && ! command -v "${DEMO_CHROME_BIN}" >/dev/null 2>&1; then
-  echo "Chrome executable not found: ${DEMO_CHROME_BIN}" >&2
-  echo "Set DEMO_CHROME_BIN if Chrome is installed under another command." >&2
-  exit 1
+if [[ "${MODE}" == "run" ]]; then
+  resolve_browser
 fi
 
 cleanup() {
@@ -121,8 +177,17 @@ if [[ ! "${EXTENSION_ID}" =~ ^[a-p]{32}$ ]]; then
   exit 1
 fi
 
+if [[ "${MODE}" == "run" ]]; then
+  CHROME_PROFILE="$(mktemp -d "${TMPDIR:-/tmp}/secureintent-shadow-chrome.XXXXXX")"
+fi
+
 echo "[3/4] Building and registering the Rust Native Messaging host..."
-"${SCRIPT_DIR}/scripts/install-host.sh" "${EXTENSION_ID}"
+if [[ "${MODE}" == "run" ]]; then
+  SHADOW_NATIVE_HOST_DIR="${CHROME_PROFILE}/NativeMessagingHosts" \
+    "${SCRIPT_DIR}/scripts/install-host.sh" "${EXTENSION_ID}" "${BROWSER_FLAVOR}"
+else
+  "${SCRIPT_DIR}/scripts/install-host.sh" "${EXTENSION_ID}" "${BROWSER_FLAVOR}"
+fi
 
 if [[ "${MODE}" == "prepare" ]]; then
   echo
@@ -206,12 +271,11 @@ if [[ "${SERVER_READY}" != "true" ]]; then
   exit 1
 fi
 
-CHROME_PROFILE="$(mktemp -d "${TMPDIR:-/tmp}/secureintent-shadow-chrome.XXXXXX")"
-
 echo
 echo "SecureIntent Shadow Upload is running."
 echo "Extension ID: ${EXTENSION_ID}"
 echo "Forge:        ${DEMO_URL}"
+echo "Browser:      $("${DEMO_CHROME_BIN}" --version)"
 echo "Try:          testdata/allow.txt, then testdata/block.pem"
 echo "Close the demo Chrome window or press Ctrl+C to stop."
 
@@ -222,7 +286,7 @@ echo "Close the demo Chrome window or press Ctrl+C to stop."
   --no-first-run \
   --no-default-browser-check \
   --new-window \
-  "${DEMO_URL}" &
+  "${DEMO_URL}" 2>"${CHROME_PROFILE}/chrome.stderr.log" &
 CHROME_PID=$!
 wait "${CHROME_PID}"
 CHROME_PID=""
