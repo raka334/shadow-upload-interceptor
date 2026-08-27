@@ -1,0 +1,26 @@
+[package]
+name = "secureintent-shadow-host"
+version = "0.1.0"
+edition = "2024"
+description = "Headless Tauri v2 Native Messaging host for SecureIntent Shadow Upload"
+publish = false
+
+[features]
+default = []
+tauri-host = ["dep:tauri"]
+
+[dependencies]
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", optional = true }
+thiserror = "2"
+zeroize = "1"
+
+[build-dependencies]
+tauri-build = "2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

@@ -1,0 +1,4 @@
+hello from a source file
+
+This harmless sample proves that an allowed file reaches the demo page.
+

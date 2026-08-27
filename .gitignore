@@ -1,0 +1,8 @@
+node_modules/
+.output/
+.wxt/
+dist/
+target/
+*.log
+.DS_Store
+native-host/com.secureintent.shadow.json
