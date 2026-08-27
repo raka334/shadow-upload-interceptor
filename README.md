@@ -25,14 +25,35 @@ its contents.
 ## Prerequisites
 
 - Google Chrome 148 or newer
-- Node.js 22 or newer and pnpm 10
+- Node.js 22 or newer (`run-demo.sh` uses pnpm 10 from `PATH` or bootstraps it through `npx`)
 - Rust 1.85 or newer
 
 Chrome 148 is intentional: the extension opts into structured-clone messaging so a `Uint8Array`
 can be copied from the content script to the MV3 worker without converting the file to base64 in
 the page context. Native Messaging remains JSON and is base64-chunked only at that boundary.
 
-## Setup
+## One-command demo
+
+On Google Chrome for Linux, run:
+
+```bash
+chmod +x run-demo.sh
+./run-demo.sh
+```
+
+The launcher installs pnpm dependencies, builds the WXT extension, builds and registers the Rust
+host, serves Forge on port 4173, and opens a fresh temporary Chrome profile with the unpacked
+extension loaded. Close that Chrome window or press `Ctrl+C` to stop the server. It does not require
+GTK, WebKit, Tauri, Python, or an external static-server package.
+
+The unpacked extension carries a public development key so its ID is stable and the launcher can
+pin the exact Native Messaging `allowed_origin` automatically. The key is not a credential or a
+private signing key. A production build would obtain its stable identity from the Chrome Web Store
+or enterprise-managed deployment.
+
+To build and register everything without opening Chrome, use `./run-demo.sh --prepare-only`.
+
+## Manual setup
 
 ```bash
 git clone <YOUR_REPOSITORY_URL> shadow-upload-interceptor && cd shadow-upload-interceptor

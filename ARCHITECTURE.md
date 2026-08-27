@@ -60,6 +60,11 @@ Only the background calls `connectNative`. Chrome launches one host process for 
 calling extension origin, and owns the stdio pipes. The native-host manifest allows exactly
 `chrome-extension://<ID>/`; wildcards are absent and the trailing slash is required.
 
+For a reproducible one-command demo, the unpacked manifest contains a public development key. The
+launcher derives Chrome's stable extension ID from that key and writes the matching host origin.
+This public key is identity metadata, not an authentication secret; production identity comes from
+a signed Web Store package or enterprise-managed deployment.
+
 ## Native Messaging instead of a local server
 
 Native Messaging exposes no TCP listener. A web origin cannot probe or authenticate to the Rust
