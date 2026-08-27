@@ -45,8 +45,14 @@ dropZone.addEventListener('drop', (event) => {
   input.dispatchEvent(new Event('change', { bubbles: true }));
 });
 
-window.addEventListener('secureintent:status', (event) => {
-  const { state, filename, detail } = event.detail ?? {};
+function applySecureIntentStatus(rawStatus) {
+  let status;
+  try {
+    status = JSON.parse(rawStatus);
+  } catch {
+    return;
+  }
+  const { state, filename, detail } = status;
   dropZone.classList.remove('is-dragging');
   if (state === 'scanning') {
     received.hidden = true;
@@ -59,4 +65,12 @@ window.addEventListener('secureintent:status', (event) => {
   if (state === 'allowed' && detail) {
     statusDetail.textContent = detail;
   }
+}
+
+new MutationObserver(() => {
+  const status = document.documentElement.dataset.secureintentStatus;
+  if (status) applySecureIntentStatus(status);
+}).observe(document.documentElement, {
+  attributes: true,
+  attributeFilter: ['data-secureintent-status'],
 });

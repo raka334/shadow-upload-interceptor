@@ -14,7 +14,9 @@ interface DemoStatus {
 }
 
 function notifyPage(status: DemoStatus): void {
-  window.dispatchEvent(new CustomEvent('secureintent:status', { detail: status }));
+  // DOM attributes cross Chrome's isolated-world boundary reliably; this demo-only
+  // channel carries status metadata, never file bytes or matched content.
+  document.documentElement.dataset.secureintentStatus = JSON.stringify(status);
 }
 
 function allowResult(reason: string): ScanFileResult {
@@ -77,7 +79,7 @@ export function installUploadGuard(): () => void {
 
     if (result.failOpen && !warnedFailOpen) {
       warnedFailOpen = true;
-      console.warn('SecureIntent local scanner unavailable; upload allowed.');
+      console.warn('SecureIntent local scanner unavailable; upload allowed.', result.reason);
     }
     const status: DemoStatus = { state: 'allowed', filename: file.name };
     if (result.reason === 'too_large') {
