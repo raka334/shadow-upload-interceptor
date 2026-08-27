@@ -2,12 +2,12 @@
 name = "secureintent-shadow-host"
 version = "0.1.0"
 edition = "2024"
-description = "Headless Tauri v2 Native Messaging host for SecureIntent Shadow Upload"
+description = "Headless Rust Native Messaging host for SecureIntent Shadow Upload"
 publish = false
 
 [features]
 default = []
-tauri-host = ["dep:tauri"]
+tauri-host = ["dep:tauri", "dep:tauri-build"]
 
 [dependencies]
 base64 = "0.22"
@@ -18,7 +18,7 @@ thiserror = "2"
 zeroize = "1"
 
 [build-dependencies]
-tauri-build = "2"
+tauri-build = { version = "2", optional = true }
 
 [profile.release]
 lto = "thin"

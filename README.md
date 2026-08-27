@@ -3,8 +3,10 @@
 **Files with secrets never leave the machine. The local daemon only returns Block or Allow.**
 
 This repository is a production-shaped vertical slice of SecureIntent's upload boundary: a polished
-dummy AI destination, a Chrome MV3 extension built with WXT/React/TypeScript, and a zero-window
-Tauri v2 Native Messaging host written in Rust. No file bytes are sent to a cloud service.
+dummy AI destination, a Chrome MV3 extension built with WXT/React/TypeScript, and a headless Rust
+Native Messaging host. An optional zero-window Tauri v2 wrapper preserves the production desktop
+integration seam without adding GUI dependencies to the demo. No file bytes are sent to a cloud
+service.
 
 ## The 60-second demo
 
@@ -25,7 +27,6 @@ its contents.
 - Google Chrome 148 or newer
 - Node.js 22 or newer and pnpm 10
 - Rust 1.85 or newer
-- Linux desktop with the [Tauri v2 system prerequisites](https://v2.tauri.app/start/prerequisites/)
 
 Chrome 148 is intentional: the extension opts into structured-clone messaging so a `Uint8Array`
 can be copied from the content script to the MV3 worker without converting the file to base64 in
@@ -95,9 +96,11 @@ cd extension && pnpm test && pnpm compile && pnpm build
 
 Rust tests cover safe, PEM, empty and binary inputs; framing; split markers; offset validation;
 size mismatches; and the 8 MiB bound. TypeScript tests cover protocol validation and `FileList`
-reconstruction. `cargo test` intentionally exercises the pure Rust core without requiring a display
-stack; `install-host.sh` enables the `tauri-host` feature and builds the genuine zero-window Tauri
-process installed into Chrome.
+reconstruction. `install-host.sh` builds the same dependency-light Rust stdio host exercised by the
+tests and smoke script, so a reviewer does not need GTK or WebKit to run the demo. On a workstation
+with the [Tauri v2 system prerequisites](https://v2.tauri.app/start/prerequisites/),
+`cargo build --release --features tauri-host --manifest-path daemon/Cargo.toml` builds the optional
+zero-window Tauri lifecycle wrapper around the identical protocol and scanner.
 
 ## Why Native Messaging, not localhost WebSockets
 
@@ -138,7 +141,7 @@ work does not deadlock.
 - Files larger than 8 MiB are allowed without scanning and clearly reported as such.
 - The mock rule is the byte marker `BEGIN RSA PRIVATE KEY`, not a production detector.
 - The page is a local prop. No ChatGPT, Claude, SaaS, cloud, account, or telemetry integration exists.
-- The Tauri process has no window, tray, updater, settings, or frontend.
+- The optional Tauri wrapper has no window, tray, updater, settings, or frontend.
 
 ## Two-minute Loom shot list
 

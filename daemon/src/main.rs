@@ -38,8 +38,8 @@ fn main() {
     }
 }
 
-/// Minimal-CI mode keeps scanner/protocol tests runnable without Linux WebKit headers.
-/// The installer always enables `tauri-host`; this path is also useful for protocol debugging.
+/// The default host is dependency-light because Chrome already owns the spawned process lifecycle.
+/// Enable `tauri-host` only when embedding the same stdio loop in the production desktop shell.
 #[cfg(not(feature = "tauri-host"))]
 fn main() {
     let stdin = io::stdin();

@@ -8,7 +8,7 @@ sequenceDiagram
     participant Page as Forge dummy page
     participant CS as WXT content script
     participant BG as MV3 background worker
-    participant Host as Headless Tauri v2 host
+    participant Host as Headless Rust native host
 
     Developer->>Page: choose or drop File
     CS-->>CS: capture on window; cancel synchronously
@@ -107,13 +107,18 @@ This guarantees scrubbing only for allocations the host owns. Chrome and V8 hold
 facilities are outside the host's absolute control. No temporary file, mmap, content log, or cloud
 request is created.
 
-## Tauri's narrow role
+## Rust host and optional Tauri shell
 
-The installed native host is a genuine Tauri v2 application configured with zero windows and no
-plugins, commands, tray, updater, capabilities, bundle, or web frontend. Tauri owns desktop process
-lifecycle on the main thread. A named Rust worker thread owns blocking Native Messaging stdio; when
-Chrome closes the pipe, it asks the Tauri handle to exit. The scanner and protocol remain ordinary
-Rust modules and are unit-testable without starting the platform runtime.
+The demo installer deliberately builds the plain Rust stdio binary. Chrome already owns this
+process's lifecycle through `connectNative`, so adding a desktop event loop would not improve the
+assessment path and would force reviewers to install GTK/WebKit development libraries.
+
+The `tauri-host` Cargo feature remains as the production integration seam. On a workstation with
+Tauri v2 prerequisites,
+`cargo build --release --features tauri-host --manifest-path daemon/Cargo.toml` wraps the identical
+protocol and scanner in a genuine zero-window Tauri application. Tauri owns the main-thread
+lifecycle while a named Rust worker owns blocking stdio. There are no plugins, commands, tray,
+updater, capabilities, bundle, or web frontend in either path.
 
 ## Threat model
 
@@ -135,4 +140,3 @@ Rust protocol/scanner becomes a Tauri-managed service module; production rules a
 versioned policy bundles and evaluate locally. Native Messaging remains the authenticated browser
 control plane. The demo deliberately proves that seam without merging codebases or inventing a
 desktop UI.
-

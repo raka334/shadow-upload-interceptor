@@ -16,15 +16,8 @@ if [[ ! "${EXTENSION_ID}" =~ ^[a-p]{32}$ ]]; then
   exit 2
 fi
 
-if [[ "$(uname -s)" == "Linux" ]] && ! pkg-config --exists libsoup-3.0 javascriptcoregtk-4.1; then
-  echo "Missing Tauri v2 Linux development libraries." >&2
-  echo "On Ubuntu/Debian install the official prerequisites first:" >&2
-  echo "  sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev" >&2
-  exit 1
-fi
-
-echo "Building the headless Tauri v2 host..."
-cargo build --release --features tauri-host --manifest-path "${DAEMON_MANIFEST}"
+echo "Building the headless Native Messaging host..."
+cargo build --release --manifest-path "${DAEMON_MANIFEST}"
 
 if [[ ! -f "${BINARY}" ]]; then
   echo "Expected native host binary was not produced: ${BINARY}" >&2
