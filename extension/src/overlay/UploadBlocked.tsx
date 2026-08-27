@@ -19,6 +19,10 @@ function findingCopy(rule: RuleId): string {
   }
 }
 
+function findingLabel(rule: RuleId): string {
+  return rule === 'aws_access_key_id' ? 'Access key detected' : 'Private key detected';
+}
+
 function ShieldMark() {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -68,18 +72,37 @@ export function UploadBlocked({ filename, rule, onDismiss }: UploadBlockedProps)
           <span className="si-brand-ai">.ai</span>
         </div>
         <div className="si-divider" />
-        <div className="si-alert-mark">
-          <ShieldMark />
+        <div className="si-alert-row">
+          <div className="si-alert-mark">
+            <ShieldMark />
+          </div>
+          <span className="si-finding">{findingLabel(rule)}</span>
         </div>
         <h1 id="si-upload-title">Upload blocked</h1>
         <p id="si-upload-description">
           <strong>{filename}</strong> {findingCopy(rule)}. It was not sent to this page. The file
           never left your machine.
         </p>
+        <div className="si-assurance">
+          <span className="si-assurance-mark" aria-hidden="true">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="m3.5 8.2 2.8 2.8 6.2-6" />
+            </svg>
+          </span>
+          <span>
+            <strong>Stopped before upload</strong>
+            <small>No file content was delivered to Forge.</small>
+          </span>
+        </div>
         <button ref={primaryRef} className="si-primary" type="button" onClick={onDismiss}>
           Got it
         </button>
-        <span className="si-footnote">Scanned locally · Zero retention</span>
+        <div className="si-footnote">
+          <span>Scanned locally · Zero retention</span>
+          <span>
+            <kbd>Esc</kbd> to dismiss
+          </span>
+        </div>
       </section>
     </div>
   );

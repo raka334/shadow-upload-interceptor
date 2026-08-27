@@ -107,6 +107,13 @@ async function chooseFile(page: Page, filePath: string): Promise<void> {
   await (await chooserPromise).setFiles(filePath);
 }
 
+async function chooseFileWithKeyboard(page: Page, filePath: string): Promise<void> {
+  const chooserPromise = page.waitForEvent('filechooser');
+  await page.locator('#forge-drop-zone').focus();
+  await page.keyboard.press('Enter');
+  await (await chooserPromise).setFiles(filePath);
+}
+
 async function dropFile(page: Page, filePath: string): Promise<void> {
   const zone = page.locator('#forge-drop-zone');
   const box = await zone.boundingBox();
@@ -186,7 +193,7 @@ test.describe('protected upload loop', () => {
 
   test('allows harmless bytes even when the filename looks secret', async () => {
     const page = await openForge(requireContext(running), 'active');
-    await chooseFile(page, join(fixtureDirectory, 'private-key.pem'));
+    await chooseFileWithKeyboard(page, join(fixtureDirectory, 'private-key.pem'));
     await expectAllowed(page, 'private-key.pem');
     await page.close();
   });

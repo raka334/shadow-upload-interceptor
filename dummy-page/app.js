@@ -15,6 +15,8 @@ function formatBytes(bytes) {
 
 function setStatus(status, title, detail) {
   statusCard.dataset.status = status;
+  dropZone.dataset.state = status;
+  dropZone.setAttribute('aria-busy', status === 'scanning' ? 'true' : 'false');
   statusTitle.textContent = title;
   statusDetail.textContent = detail;
 }
@@ -28,6 +30,12 @@ function acceptFile(file) {
 }
 
 input.addEventListener('change', () => acceptFile(input.files?.[0]));
+
+dropZone.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  event.preventDefault();
+  input.click();
+});
 
 dropZone.addEventListener('dragenter', () => dropZone.classList.add('is-dragging'));
 dropZone.addEventListener('dragleave', (event) => {
@@ -74,16 +82,20 @@ function applyGuardState() {
   if (!canShowGuard) return;
 
   if (guard === 'checking') {
-    setStatus('checking', 'Checking local scanner…', 'Confirming the private OS bridge.');
+    setStatus('checking', 'Checking local scanner…', 'Starting the on-device protection service.');
   }
   if (guard === 'active') {
-    setStatus('ready', 'Protected — scanner ready', 'Rust scanner connected through Native Messaging.');
+    setStatus(
+      'ready',
+      'Protected — scanner ready',
+      'Files are checked on this device before Forge can receive them.',
+    );
   }
   if (guard === 'degraded') {
     setStatus(
       'unavailable',
       'Local scanner unavailable',
-      'Uploads will continue in fail-open mode until the scanner reconnects.',
+      'Files will continue without scanning until the local service reconnects.',
     );
   }
 }
@@ -106,7 +118,7 @@ setTimeout(() => {
     setStatus(
       'unavailable',
       'Protection unavailable',
-      'The SecureIntent extension did not load; uploads will not be scanned.',
+      'Reload SecureIntent to scan files locally before Forge receives them.',
     );
   }
 }, 800);
