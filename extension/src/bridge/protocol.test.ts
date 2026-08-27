@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'vitest';
-import { allowFailOpen, isNativeVerdict, isScanFileRequest, MAX_FILE_BYTES } from './protocol';
+import {
+  allowFailOpen,
+  isNativeHealth,
+  isNativeVerdict,
+  isRuleId,
+  isScanFileRequest,
+  MAX_FILE_BYTES,
+  PROTOCOL_VERSION,
+  RULE_IDS,
+} from './protocol';
 
 describe('extension bridge protocol', () => {
   test('accepts a bounded typed-byte scan request', () => {
@@ -28,6 +37,19 @@ describe('extension bridge protocol', () => {
     ).toBe(false);
   });
 
+  test('rejects control characters and oversized UTF-8 filename metadata', () => {
+    const baseRequest = {
+      type: 'scan-file',
+      scanId: 'scan-1',
+      mime: 'text/plain',
+      size: 0,
+      bytes: new Uint8Array(),
+    };
+    expect(isScanFileRequest({ ...baseRequest, name: 'line\nbreak.txt' })).toBe(false);
+    expect(isScanFileRequest({ ...baseRequest, name: '界'.repeat(200) })).toBe(false);
+    expect(isScanFileRequest({ ...baseRequest, scanId: 'bad/id', name: 'safe.txt' })).toBe(false);
+  });
+
   test('accepts only the matching verdict and known rule', () => {
     expect(
       isNativeVerdict(
@@ -44,6 +66,47 @@ describe('extension bridge protocol', () => {
       isNativeVerdict(
         { type: 'verdict', id: 'some-other-scan', decision: 'block', rule: 'pem_private_key' },
         'scan-1',
+      ),
+    ).toBe(false);
+
+    expect(
+      isNativeVerdict(
+        { type: 'verdict', id: 'scan-1', decision: 'block', rule: 'made_up_rule' },
+        'scan-1',
+      ),
+    ).toBe(false);
+    expect(
+      isNativeVerdict({ type: 'verdict', id: 'scan-1', decision: 'block', rule: null }, 'scan-1'),
+    ).toBe(false);
+    expect(
+      isNativeVerdict(
+        { type: 'verdict', id: 'scan-1', decision: 'allow', rule: 'pem_private_key' },
+        'scan-1',
+      ),
+    ).toBe(false);
+  });
+
+  test('recognizes every registered content rule', () => {
+    expect(RULE_IDS.every((rule) => isRuleId(rule))).toBe(true);
+    expect(isRuleId('filename_extension')).toBe(false);
+  });
+
+  test('requires a matching, versioned native health response', () => {
+    expect(
+      isNativeHealth(
+        {
+          type: 'health',
+          id: 'health-1',
+          protocol: PROTOCOL_VERSION,
+          status: 'ready',
+        },
+        'health-1',
+      ),
+    ).toBe(true);
+    expect(
+      isNativeHealth(
+        { type: 'health', id: 'another-id', protocol: PROTOCOL_VERSION, status: 'ready' },
+        'health-1',
       ),
     ).toBe(false);
   });

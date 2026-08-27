@@ -4,9 +4,9 @@
 
 This repository is a production-shaped vertical slice of SecureIntent's upload boundary: a polished
 dummy AI destination, a Chrome MV3 extension built with WXT/React/TypeScript, and a headless Rust
-Native Messaging host. An optional zero-window Tauri v2 wrapper preserves the production desktop
-integration seam without adding GUI dependencies to the demo. No file bytes are sent to a cloud
-service.
+Native Messaging host. The scanner is also shipped as a separately named, zero-window Tauri v2
+binary; both executables run the same tested Rust protocol library. No file bytes are sent to a
+cloud service.
 
 ## The 60-second demo
 
@@ -19,8 +19,12 @@ service.
 4. Stop or uninstall the native host and try again. After the bounded timeout the upload proceeds:
    a dead security tool does not freeze the developer's file picker.
 
-The warning is rendered by the extension in a closed Shadow DOM. The page cannot inspect or alter
-its contents.
+Decisions come from bytes, never extensions: [`testdata/renamed-secret.txt`](testdata/renamed-secret.txt)
+still blocks, while the browser suite proves that harmless bytes renamed `private-key.pem` are
+allowed.
+
+The warning is rendered by the extension in a closed Shadow DOM. The page cannot inspect its
+internal warning UI, and removing the host element cannot recover a file that was already blocked.
 
 ## Prerequisites
 
@@ -46,6 +50,10 @@ host, serves Forge on port 4173, and opens a fresh temporary Chrome for Testing 
 with the unpacked extension loaded. It discovers compatible Playwright/Puppeteer browser caches or
 accepts `DEMO_CHROME_BIN=/path/to/chrome`. Close that browser window or press `Ctrl+C` to stop the
 server. It does not require GTK, WebKit, Tauri, Python, or an external static-server package.
+
+To exercise the complete Tauri v2 lifecycle instead, install Tauri's Linux prerequisites and run
+`./run-demo.sh --tauri-host`. The flag changes only the registered host binary; the browser protocol,
+scanner, zeroization, and verdict behavior remain identical.
 
 Because Chrome resolves user-level Native Messaging hosts relative to an overridden user-data
 directory, the launcher installs a pinned host manifest inside its disposable profile. Manual setup
@@ -95,8 +103,8 @@ npx serve dummy-page -l 4173
 http://localhost:4173
 ```
 
-The installer builds `daemon/target/release/secureintent-shadow-host` and writes an absolute path
-plus the exact extension origin to:
+The installer defaults to `daemon/target/release/secureintent-shadow-host` and writes its absolute
+path plus the exact extension origin to:
 
 ```text
 ~/.config/google-chrome/NativeMessagingHosts/com.secureintent.shadow.json
@@ -104,6 +112,18 @@ plus the exact extension origin to:
 
 Chromium uses `~/.config/chromium/NativeMessagingHosts/`. macOS and Windows use different
 registration locations; this take-home's tested path is Google Chrome on Linux.
+
+The registration is written atomically with mode `0600`, pins one exact extension origin, and is
+validated after installation. Diagnose or remove it with:
+
+```bash
+./scripts/doctor.sh EXTENSION_ID_FROM_CHROME
+./scripts/uninstall-host.sh chrome
+```
+
+`doctor.sh` checks the manifest and executable, reports its SHA-256, and exercises the protocol
+handshake, Block fixture, and Allow fixture without exposing file contents. Uninstall removes only
+the registration; built binaries are left intact.
 
 ## Tests
 
@@ -116,21 +136,50 @@ without Chrome:
 
 ```bash
 cargo build --manifest-path daemon/Cargo.toml
+node scripts/smoke-host.mjs --health
 node scripts/smoke-host.mjs testdata/block.pem block
 node scripts/smoke-host.mjs testdata/allow.txt allow
+./scripts/test-install.sh
 ```
 
 ```bash
 cd extension && pnpm test && pnpm compile && pnpm build
 ```
 
-Rust tests cover safe, PEM, empty and binary inputs; framing; split markers; offset validation;
-size mismatches; and the 8 MiB bound. TypeScript tests cover protocol validation and `FileList`
+The real-browser suite launches a fresh Chromium profile and checks picker and trusted drag/drop
+flows through Native Messaging, renamed files, closed Shadow DOM, size-cap behavior, and daemon-down
+fail-open:
+
+```bash
+cd extension
+pnpm exec playwright install chromium
+pnpm e2e
+```
+
+Rust tests cover every registered rule, safe, empty and binary inputs; strict framing; protocol
+versioning; split markers; malformed requests; offset validation; size mismatches; and the 8 MiB
+bound. TypeScript tests cover protocol validation, rule IDs, health responses, and `FileList`
 reconstruction. `install-host.sh` builds the same dependency-light Rust stdio host exercised by the
-tests and smoke script, so a reviewer does not need GTK or WebKit to run the demo. On a workstation
-with the [Tauri v2 system prerequisites](https://v2.tauri.app/start/prerequisites/),
-`cargo build --release --features tauri-host --manifest-path daemon/Cargo.toml` builds the optional
-zero-window Tauri lifecycle wrapper around the identical protocol and scanner.
+tests and smoke script, so a reviewer does not need GTK or WebKit to run the default demo.
+
+### Tauri v2 host
+
+Tauri is a real second executable, not a compile-time label applied to the lightweight host. It has
+no window or web frontend; Tauri owns the main-thread application lifecycle and
+`tauri::async_runtime::spawn_blocking` runs Chrome's blocking stdin/stdout loop. On Debian/Ubuntu:
+
+```bash
+sudo apt install libwebkit2gtk-4.1-dev
+cargo build --release --manifest-path daemon/Cargo.toml \
+  --features tauri-host --bin secureintent-shadow-tauri
+SHADOW_HOST_BINARY=daemon/target/release/secureintent-shadow-tauri \
+  node scripts/smoke-host.mjs testdata/block.pem block
+./run-demo.sh --tauri-host
+```
+
+The ordinary `./run-demo.sh` intentionally remains dependency-light. CI separately builds the
+Tauri executable and runs both protocol smoke tests and the full Chromium suite under a virtual
+display.
 
 ## Why Native Messaging, not localhost WebSockets
 
@@ -149,7 +198,9 @@ this bounded demo deliberately keeps the complete path on chunked Native Messagi
 The host validates the declared size before allocating. It preallocates one
 `Zeroizing<Vec<u8>>`, validates contiguous offsets, wraps every decoded chunk in `Zeroizing`, scans
 the final buffer as bytes, and drops it before writing the verdict. Incoming JSON frames are also
-held in a zeroizing buffer, and serde borrows the base64 field instead of copying it.
+held in a zeroizing buffer, and serde borrows the base64 field instead of copying it. The extension
+also overwrites the content-script and worker `Uint8Array` allocations after each decision as a
+best-effort reduction in browser-side lifetime.
 
 Zeroization is an ownership guarantee, not a claim of magical erasure. Chrome, OS pipes, JavaScript
 garbage collection, system allocators, crash dumps, swap, and dependency internals may create
@@ -158,8 +209,8 @@ does not write temporary files, and never logs file contents.
 
 ## Fail-open behavior
 
-Missing host, connection failure, disconnect, malformed response, timeout, and files over 8 MiB all
-resolve to **Allow**. The extension reconstructs the read-only `FileList` and delivers a fresh
+Missing host, connection failure, disconnect, protocol mismatch, malformed response, timeout, and
+files over 8 MiB all resolve to **Allow**. The extension reconstructs the read-only `FileList` and delivers a fresh
 untrusted `change` event to the destination. One console warning records that local scanning was
 unavailable. This is a deliberate developer-first choice: protection may degrade, but developer
 work does not deadlock.
@@ -169,9 +220,11 @@ work does not deadlock.
 - Google Chrome 148+ on Linux is the supported demo platform.
 - One file is scanned per picker/drop interaction.
 - Files larger than 8 MiB are allowed without scanning and clearly reported as such.
-- The mock rule is the byte marker `BEGIN RSA PRIVATE KEY`, not a production detector.
+- The demo registry scans byte content for PEM RSA, PKCS#8, OpenSSH private-key markers, and
+  access-key-shaped `AKIA`/`ASIA` identifiers. It is intentionally not a production entropy/parser
+  engine.
 - The page is a local prop. No ChatGPT, Claude, SaaS, cloud, account, or telemetry integration exists.
-- The optional Tauri wrapper has no window, tray, updater, settings, or frontend.
+- The Tauri host has no window, tray, updater, settings, capabilities, or frontend.
 
 ## Two-minute Loom shot list
 

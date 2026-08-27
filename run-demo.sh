@@ -11,6 +11,7 @@ DEMO_URL="http://localhost:${DEMO_PORT}"
 DEMO_CHROME_BIN="${DEMO_CHROME_BIN:-}"
 PNPM_VERSION="10.28.2"
 MODE="run"
+HOST_VARIANT="native"
 BROWSER_FLAVOR="chrome"
 SERVER_PID=""
 CHROME_PID=""
@@ -18,13 +19,14 @@ CHROME_PROFILE=""
 
 usage() {
   cat <<'EOF'
-Usage: ./run-demo.sh [--prepare-only]
+Usage: ./run-demo.sh [--prepare-only] [--tauri-host]
 
 Builds the extension and Rust host, installs the Native Messaging manifest,
 serves Forge, and opens a clean Chrome window with the extension loaded.
 
 Options:
   --prepare-only  Build and install without starting Forge or Chrome.
+  --tauri-host    Use the zero-window Tauri v2 host (requires Tauri system packages).
   -h, --help      Show this help.
 
 Environment:
@@ -89,12 +91,15 @@ resolve_browser() {
   classify_browser
 }
 
-case "${1:-}" in
-  "") ;;
-  --prepare-only) MODE="prepare" ;;
-  -h|--help) usage; exit 0 ;;
-  *) usage >&2; exit 2 ;;
-esac
+while (( $# > 0 )); do
+  case "$1" in
+    --prepare-only) MODE="prepare" ;;
+    --tauri-host) HOST_VARIANT="tauri" ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+  shift
+done
 
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "This demo launcher currently supports Google Chrome on Linux." >&2
@@ -181,12 +186,14 @@ if [[ "${MODE}" == "run" ]]; then
   CHROME_PROFILE="$(mktemp -d "${TMPDIR:-/tmp}/secureintent-shadow-chrome.XXXXXX")"
 fi
 
-echo "[3/4] Building and registering the Rust Native Messaging host..."
+echo "[3/4] Building and registering the Rust Native Messaging host (${HOST_VARIANT})..."
 if [[ "${MODE}" == "run" ]]; then
   SHADOW_NATIVE_HOST_DIR="${CHROME_PROFILE}/NativeMessagingHosts" \
-    "${SCRIPT_DIR}/scripts/install-host.sh" "${EXTENSION_ID}" "${BROWSER_FLAVOR}"
+    "${SCRIPT_DIR}/scripts/install-host.sh" \
+      "${EXTENSION_ID}" "${BROWSER_FLAVOR}" "${HOST_VARIANT}"
 else
-  "${SCRIPT_DIR}/scripts/install-host.sh" "${EXTENSION_ID}" "${BROWSER_FLAVOR}"
+  "${SCRIPT_DIR}/scripts/install-host.sh" \
+    "${EXTENSION_ID}" "${BROWSER_FLAVOR}" "${HOST_VARIANT}"
 fi
 
 if [[ "${MODE}" == "prepare" ]]; then
@@ -198,54 +205,8 @@ fi
 
 echo "[4/4] Starting Forge and Chrome..."
 SERVER_TOKEN="$$-${RANDOM}-${RANDOM}"
-node - "${DUMMY_PAGE_DIR}" "${DEMO_PORT}" "${SERVER_TOKEN}" <<'NODE' &
-const { createServer } = require('node:http');
-const { readFile } = require('node:fs');
-const { join } = require('node:path');
-
-const root = process.argv[2];
-const port = Number(process.argv[3]);
-const healthToken = process.argv[4];
-const files = new Map([
-  ['/', ['index.html', 'text/html; charset=utf-8']],
-  ['/index.html', ['index.html', 'text/html; charset=utf-8']],
-  ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
-  ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
-]);
-
-const server = createServer((request, response) => {
-  const pathname = new URL(request.url, 'http://localhost').pathname;
-  if (pathname === '/__secureintent_health') {
-    response.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
-    response.end(healthToken);
-    return;
-  }
-
-  const entry = files.get(pathname);
-  if (!entry) {
-    response.writeHead(404).end('Not found');
-    return;
-  }
-  readFile(join(root, entry[0]), (error, body) => {
-    if (error) {
-      response.writeHead(500).end('Unable to read demo page');
-      return;
-    }
-    response.writeHead(200, {
-      'Content-Type': entry[1],
-      'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff',
-    });
-    response.end(body);
-  });
-});
-
-server.on('error', (error) => {
-  console.error(`Forge server failed: ${error.message}`);
-  process.exit(1);
-});
-server.listen(port, '127.0.0.1');
-NODE
+SHADOW_DEMO_HEALTH_TOKEN="${SERVER_TOKEN}" \
+  node "${SCRIPT_DIR}/scripts/serve-demo.mjs" "${DUMMY_PAGE_DIR}" "${DEMO_PORT}" &
 SERVER_PID=$!
 
 SERVER_READY="false"

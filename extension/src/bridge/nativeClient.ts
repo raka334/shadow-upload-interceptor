@@ -1,9 +1,13 @@
 import { browser } from 'wxt/browser';
 import {
   allowFailOpen,
+  HEALTH_TIMEOUT_MS,
+  type HealthCheckResult,
+  isNativeHealth,
   isNativeVerdict,
   NATIVE_HOST,
   NATIVE_TIMEOUT_MS,
+  PROTOCOL_VERSION,
   RAW_CHUNK_BYTES,
   type ScanFileRequest,
   type ScanFileResult,
@@ -61,6 +65,7 @@ export function scanWithNativeHost(request: ScanFileRequest): Promise<ScanFileRe
         id: request.scanId,
         name: request.name,
         size: request.size,
+        protocol: PROTOCOL_VERSION,
       });
       for (let offset = 0; offset < request.bytes.length; offset += RAW_CHUNK_BYTES) {
         const chunk = request.bytes.subarray(
@@ -77,6 +82,56 @@ export function scanWithNativeHost(request: ScanFileRequest): Promise<ScanFileRe
       port.postMessage({ type: 'scan_end', id: request.scanId });
     } catch {
       finish(allowFailOpen('host_unavailable'));
+    }
+  });
+}
+
+/** Confirms that Chrome can launch a host speaking this exact protocol version. */
+export function checkNativeHost(id: string): Promise<HealthCheckResult> {
+  return new Promise((resolve) => {
+    let settled = false;
+    let port: ReturnType<typeof browser.runtime.connectNative> | undefined;
+
+    const finish = (result: HealthCheckResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        port?.disconnect();
+      } catch {
+        // Already disconnected.
+      }
+      resolve(result);
+    };
+
+    const timer = setTimeout(
+      () => finish({ available: false, protocol: null, reason: 'timeout' }),
+      HEALTH_TIMEOUT_MS,
+    );
+
+    try {
+      port = browser.runtime.connectNative(NATIVE_HOST);
+      port.onMessage.addListener((message: unknown) => {
+        if (!isNativeHealth(message, id)) {
+          finish({ available: false, protocol: null, reason: 'invalid_response' });
+          return;
+        }
+        if (message.status !== 'ready' || message.protocol !== PROTOCOL_VERSION) {
+          finish({
+            available: false,
+            protocol: message.protocol,
+            reason: 'protocol_mismatch',
+          });
+          return;
+        }
+        finish({ available: true, protocol: message.protocol });
+      });
+      port.onDisconnect.addListener(() =>
+        finish({ available: false, protocol: null, reason: 'host_disconnected' }),
+      );
+      port.postMessage({ type: 'health', id, protocol: PROTOCOL_VERSION });
+    } catch {
+      finish({ available: false, protocol: null, reason: 'host_unavailable' });
     }
   });
 }

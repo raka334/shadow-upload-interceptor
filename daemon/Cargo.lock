@@ -2588,6 +2588,7 @@ name = "secureintent-shadow-host"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "memchr",
  "serde",
  "serde_json",
  "tauri",

@@ -1,16 +1,23 @@
 import { browser } from 'wxt/browser';
-import { MAX_FILE_BYTES, type ScanFileResult } from '../bridge/protocol';
+import {
+  type HealthCheckResult,
+  MAX_FILE_BYTES,
+  type RuleId,
+  type ScanFileResult,
+} from '../bridge/protocol';
 import { mountUploadOverlay } from '../overlay/mountUploadOverlay';
 import { resumeIntoInput } from './resumeUpload';
 
 const FILE_INPUT_SELECTOR = 'input[type="file"][data-forge-upload]';
 const CONTENT_TIMEOUT_MS = 3_500;
+const CONTENT_HEALTH_TIMEOUT_MS = 2_000;
 let warnedFailOpen = false;
 
 interface DemoStatus {
   state: 'scanning' | 'allowed' | 'blocked';
   filename: string;
   detail?: string;
+  rule?: RuleId;
 }
 
 function notifyPage(status: DemoStatus): void {
@@ -41,10 +48,30 @@ async function requestScan(file: File): Promise<ScanFileResult> {
     bytes,
   }) as Promise<ScanFileResult>;
 
+  try {
+    return await Promise.race([
+      request,
+      new Promise<ScanFileResult>((resolve) => {
+        setTimeout(() => resolve(allowResult('timeout')), CONTENT_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    // V8 may retain other copies, but this content-script allocation no longer needs the bytes.
+    bytes.fill(0);
+  }
+}
+
+async function requestHealth(): Promise<HealthCheckResult> {
+  const request = browser.runtime.sendMessage({
+    type: 'health-check',
+  }) as Promise<HealthCheckResult>;
   return Promise.race([
     request,
-    new Promise<ScanFileResult>((resolve) => {
-      setTimeout(() => resolve(allowResult('timeout')), CONTENT_TIMEOUT_MS);
+    new Promise<HealthCheckResult>((resolve) => {
+      setTimeout(
+        () => resolve({ available: false, protocol: null, reason: 'timeout' }),
+        CONTENT_HEALTH_TIMEOUT_MS,
+      );
     }),
   ]);
 }
@@ -59,7 +86,19 @@ function containsFiles(event: DragEvent): boolean {
 
 export function installUploadGuard(): () => void {
   let generation = 0;
-  document.documentElement.dataset.secureintentGuard = 'active';
+  let installed = true;
+  document.documentElement.dataset.secureintentGuard = 'checking';
+
+  const healthGeneration = generation;
+  void requestHealth()
+    .then((health) => {
+      if (!installed || generation !== healthGeneration) return;
+      document.documentElement.dataset.secureintentGuard = health.available ? 'active' : 'degraded';
+    })
+    .catch(() => {
+      if (!installed || generation !== healthGeneration) return;
+      document.documentElement.dataset.secureintentGuard = 'degraded';
+    });
 
   const processFile = async (file: File, input: HTMLInputElement, ownGeneration: number) => {
     notifyPage({ state: 'scanning', filename: file.name });
@@ -73,9 +112,17 @@ export function installUploadGuard(): () => void {
     if (generation !== ownGeneration) return;
 
     if (result.decision === 'block') {
-      notifyPage({ state: 'blocked', filename: file.name });
-      mountUploadOverlay(file.name);
+      document.documentElement.dataset.secureintentGuard = 'active';
+      const rule = result.rule ?? 'pem_private_key';
+      notifyPage({ state: 'blocked', filename: file.name, rule });
+      mountUploadOverlay(file.name, rule);
       return;
+    }
+
+    if (!result.failOpen) {
+      document.documentElement.dataset.secureintentGuard = 'active';
+    } else if (result.reason !== 'too_large') {
+      document.documentElement.dataset.secureintentGuard = 'degraded';
     }
 
     if (result.failOpen && !warnedFailOpen) {
@@ -123,6 +170,7 @@ export function installUploadGuard(): () => void {
 
     event.preventDefault();
     event.stopImmediatePropagation();
+    input.value = '';
     const ownGeneration = ++generation;
     void processFile(file, input, ownGeneration);
   };
@@ -132,6 +180,7 @@ export function installUploadGuard(): () => void {
   window.addEventListener('drop', onDrop, true);
 
   return () => {
+    installed = false;
     delete document.documentElement.dataset.secureintentGuard;
     window.removeEventListener('change', onChange, true);
     window.removeEventListener('dragover', onDragOver, true);

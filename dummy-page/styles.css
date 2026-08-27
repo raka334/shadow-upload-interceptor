@@ -232,12 +232,14 @@ h1 {
   box-shadow: 0 0 0 4px rgba(97, 112, 123, 0.1);
 }
 
+.status-card[data-status="checking"] .status-dot,
 .status-card[data-status="scanning"] .status-dot {
   animation: pulse 1.1s ease-in-out infinite;
   background: #f1b958;
   box-shadow: 0 0 0 4px rgba(241, 185, 88, 0.12);
 }
 
+.status-card[data-status="ready"] .status-dot,
 .status-card[data-status="allowed"] .status-dot {
   background: #52dea4;
   box-shadow: 0 0 0 4px rgba(82, 222, 164, 0.12);

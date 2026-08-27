@@ -1,8 +1,22 @@
 import { useEffect, useRef } from 'react';
+import type { RuleId } from '../bridge/protocol';
 
 export interface UploadBlockedProps {
   filename: string;
+  rule: RuleId;
   onDismiss: () => void;
+}
+
+function findingCopy(rule: RuleId): string {
+  switch (rule) {
+    case 'openssh_private_key':
+      return 'looks like an OpenSSH private key';
+    case 'aws_access_key_id':
+      return 'contains an AWS access-key identifier';
+    case 'pkcs8_private_key':
+    case 'pem_private_key':
+      return 'looks like a private key (PEM)';
+  }
 }
 
 function ShieldMark() {
@@ -14,12 +28,16 @@ function ShieldMark() {
   );
 }
 
-export function UploadBlocked({ filename, onDismiss }: UploadBlockedProps) {
+export function UploadBlocked({ filename, rule, onDismiss }: UploadBlockedProps) {
   const primaryRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onDismiss();
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        primaryRef.current?.focus();
+      }
     };
     window.addEventListener('keydown', onKeyDown, true);
     primaryRef.current?.focus();
@@ -31,6 +49,7 @@ export function UploadBlocked({ filename, onDismiss }: UploadBlockedProps) {
       <button
         className="si-backdrop"
         type="button"
+        tabIndex={-1}
         aria-label="Dismiss warning"
         onClick={onDismiss}
       />
@@ -39,6 +58,7 @@ export function UploadBlocked({ filename, onDismiss }: UploadBlockedProps) {
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="si-upload-title"
+        aria-describedby="si-upload-description"
       >
         <div className="si-brand">
           <span className="si-brand-mark">
@@ -52,9 +72,9 @@ export function UploadBlocked({ filename, onDismiss }: UploadBlockedProps) {
           <ShieldMark />
         </div>
         <h1 id="si-upload-title">Upload blocked</h1>
-        <p>
-          <strong>{filename}</strong> looks like a private key (PEM). It was not sent to this page.
-          The file never left your machine.
+        <p id="si-upload-description">
+          <strong>{filename}</strong> {findingCopy(rule)}. It was not sent to this page. The file
+          never left your machine.
         </p>
         <button ref={primaryRef} className="si-primary" type="button" onClick={onDismiss}>
           Got it

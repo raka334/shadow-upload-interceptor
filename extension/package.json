@@ -8,7 +8,9 @@
     "build": "wxt build -b chrome",
     "compile": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "biome check src wxt.config.ts vitest.config.ts",
+    "e2e": "playwright test --config playwright.config.ts",
+    "e2e:headed": "SHADOW_E2E_HEADED=1 playwright test --config playwright.config.ts",
+    "lint": "biome check src e2e wxt.config.ts vitest.config.ts playwright.config.ts",
     "format": "biome format --write .",
     "postinstall": "wxt prepare"
   },
@@ -17,6 +19,7 @@
     "react-dom": "^19.2.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@biomejs/biome": "2.5.10",
     "@testing-library/dom": "^10.4.1",
     "@types/react": "^19.2.14",

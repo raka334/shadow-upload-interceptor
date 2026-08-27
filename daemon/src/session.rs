@@ -1,8 +1,8 @@
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use base64::{Engine as _, decoded_len_estimate, engine::general_purpose::STANDARD};
 use thiserror::Error;
 use zeroize::Zeroizing;
 
-use crate::scan::{Decision, scan};
+use crate::scan::{ScanResult, scan};
 
 pub const MAX_FILE_BYTES: usize = 8 * 1024 * 1024;
 
@@ -70,12 +70,12 @@ impl ScanSession {
             return Err(SessionError::InvalidOffset);
         }
 
-        // The decoder owns this temporary allocation, so wrap and scrub it as well.
-        let decoded = Zeroizing::new(
-            STANDARD
-                .decode(encoded)
-                .map_err(|_| SessionError::InvalidBase64)?,
-        );
+        // Decode directly into memory we own so even a partially decoded invalid chunk is scrubbed.
+        let mut decoded = Zeroizing::new(vec![0_u8; decoded_len_estimate(encoded.len())]);
+        let decoded_length = STANDARD
+            .decode_slice(encoded, decoded.as_mut_slice())
+            .map_err(|_| SessionError::InvalidBase64)?;
+        decoded.truncate(decoded_length);
         let next_size = active
             .bytes
             .len()
@@ -88,7 +88,7 @@ impl ScanSession {
         Ok(())
     }
 
-    pub fn finish(&mut self, id: &str) -> Result<Decision, SessionError> {
+    pub fn finish(&mut self, id: &str) -> Result<ScanResult, SessionError> {
         let active = self.active.take().ok_or(SessionError::NotActive)?;
         if active.id != id {
             return Err(SessionError::WrongIdentifier);
@@ -108,7 +108,7 @@ mod tests {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
 
     use super::{MAX_FILE_BYTES, ScanSession, SessionError};
-    use crate::scan::Decision;
+    use crate::scan::{Decision, RuleId, ScanResult};
 
     #[test]
     fn detects_a_marker_split_across_chunks() {
@@ -124,7 +124,13 @@ mod tests {
         session
             .append_base64("split", first.len() as u64, &STANDARD.encode(second))
             .expect("second chunk should succeed");
-        assert_eq!(session.finish("split"), Ok(Decision::Block));
+        assert_eq!(
+            session.finish("split"),
+            Ok(ScanResult {
+                decision: Decision::Block,
+                rule: Some(RuleId::PemPrivateKey),
+            })
+        );
     }
 
     #[test]
@@ -153,6 +159,55 @@ mod tests {
         assert_eq!(
             session.begin("id", (MAX_FILE_BYTES + 1) as u64),
             Err(SessionError::TooLarge)
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_begin() {
+        let mut session = ScanSession::default();
+        session
+            .begin("first", 0)
+            .expect("first begin should succeed");
+        assert_eq!(session.begin("second", 0), Err(SessionError::AlreadyActive));
+    }
+
+    #[test]
+    fn rejects_invalid_base64() {
+        let mut session = ScanSession::default();
+        session.begin("id", 3).expect("begin should succeed");
+        assert_eq!(
+            session.append_base64("id", 0, "%%%"),
+            Err(SessionError::InvalidBase64)
+        );
+    }
+
+    #[test]
+    fn supports_two_sequential_scans() {
+        let mut session = ScanSession::default();
+        session
+            .begin("first", 0)
+            .expect("first begin should succeed");
+        assert_eq!(
+            session.finish("first"),
+            Ok(ScanResult {
+                decision: Decision::Allow,
+                rule: None,
+            })
+        );
+
+        let secret = b"BEGIN OPENSSH PRIVATE KEY";
+        session
+            .begin("second", secret.len() as u64)
+            .expect("second begin should succeed");
+        session
+            .append_base64("second", 0, &STANDARD.encode(secret))
+            .expect("second chunk should succeed");
+        assert_eq!(
+            session.finish("second"),
+            Ok(ScanResult {
+                decision: Decision::Block,
+                rule: Some(RuleId::OpensshPrivateKey),
+            })
         );
     }
 }

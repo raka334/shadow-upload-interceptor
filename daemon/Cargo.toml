@@ -4,6 +4,16 @@ version = "0.1.0"
 edition = "2024"
 description = "Headless Rust Native Messaging host for SecureIntent Shadow Upload"
 publish = false
+default-run = "secureintent-shadow-host"
+
+[[bin]]
+name = "secureintent-shadow-host"
+path = "src/main.rs"
+
+[[bin]]
+name = "secureintent-shadow-tauri"
+path = "src/bin/tauri_host.rs"
+required-features = ["tauri-host"]
 
 [features]
 default = []
@@ -11,6 +21,7 @@ tauri-host = ["dep:tauri", "dep:tauri-build"]
 
 [dependencies]
 base64 = "0.22"
+memchr = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", optional = true }

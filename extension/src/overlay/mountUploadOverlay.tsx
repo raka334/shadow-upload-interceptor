@@ -1,11 +1,15 @@
 import { createRoot } from 'react-dom/client';
+import type { RuleId } from '../bridge/protocol';
 import { overlayStyles } from './styles';
 import { UploadBlocked } from './UploadBlocked';
 
 let removeActive: (() => void) | null = null;
 
-export function mountUploadOverlay(filename: string): { remove: () => void } {
+export function mountUploadOverlay(filename: string, rule: RuleId): { remove: () => void } {
   removeActive?.();
+
+  const previouslyFocused =
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
   const host = document.createElement('secureintent-shadow-warning');
   host.style.position = 'fixed';
@@ -25,9 +29,10 @@ export function mountUploadOverlay(filename: string): { remove: () => void } {
     removed = true;
     root.unmount();
     host.remove();
+    previouslyFocused?.focus({ preventScroll: true });
     if (removeActive === remove) removeActive = null;
   };
   removeActive = remove;
-  root.render(<UploadBlocked filename={filename} onDismiss={remove} />);
+  root.render(<UploadBlocked filename={filename} rule={rule} onDismiss={remove} />);
   return { remove };
 }

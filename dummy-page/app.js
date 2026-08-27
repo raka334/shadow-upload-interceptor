@@ -68,9 +68,23 @@ function applySecureIntentStatus(rawStatus) {
 }
 
 function applyGuardState() {
-  if (document.documentElement.dataset.secureintentGuard !== 'active') return;
-  if (statusCard.dataset.status === 'waiting' || statusCard.dataset.status === 'unavailable') {
-    setStatus('allowed', 'Protected — waiting', 'SecureIntent local upload guard is active.');
+  const guard = document.documentElement.dataset.secureintentGuard;
+  const current = statusCard.dataset.status;
+  const canShowGuard = ['waiting', 'checking', 'ready', 'unavailable'].includes(current);
+  if (!canShowGuard) return;
+
+  if (guard === 'checking') {
+    setStatus('checking', 'Checking local scanner…', 'Confirming the private OS bridge.');
+  }
+  if (guard === 'active') {
+    setStatus('ready', 'Protected — scanner ready', 'Rust scanner connected through Native Messaging.');
+  }
+  if (guard === 'degraded') {
+    setStatus(
+      'unavailable',
+      'Local scanner unavailable',
+      'Uploads will continue in fail-open mode until the scanner reconnects.',
+    );
   }
 }
 
