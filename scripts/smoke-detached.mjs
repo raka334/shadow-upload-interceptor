@@ -62,7 +62,9 @@ async function waitForSocket() {
     }
     await delay(25);
   }
-  throw new Error('detached daemon did not create its socket within 10 seconds');
+  throw new Error(
+    `detached daemon did not create its socket within 10 seconds: ${Buffer.concat(daemonErrors).toString('utf8')}`,
+  );
 }
 
 async function runSmoke(arguments_) {

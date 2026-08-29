@@ -205,9 +205,9 @@ Native Messaging broker sessions.
 ### Detached Tauri v2 daemon
 
 Tauri is a real independent executable, not a compile-time label on the Chrome-owned broker. It has
-no window or web frontend. Tauri owns the main-thread application lifecycle and
-`tauri::async_runtime::spawn_blocking` runs the persistent AF_UNIX accept loop. On Debian-family
-Linux, including Kali:
+no window or web frontend. Tauri owns the main-thread application lifecycle while a named Rust OS
+thread starts the persistent AF_UNIX accept loop without depending on a GUI-ready event. On
+Debian-family Linux, including Kali:
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev
