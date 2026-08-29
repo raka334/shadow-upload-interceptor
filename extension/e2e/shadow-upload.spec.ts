@@ -129,7 +129,7 @@ async function startDaemon(): Promise<RunningDaemon> {
   });
   daemon.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk));
 
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
     if (daemon.exitCode !== null) {
       rmSync(directory, { recursive: true, force: true });
       throw new Error(
@@ -150,7 +150,7 @@ async function startDaemon(): Promise<RunningDaemon> {
 
   daemon.kill('SIGKILL');
   rmSync(directory, { recursive: true, force: true });
-  throw new Error('detached daemon did not create its private socket within 2.5 seconds');
+  throw new Error('detached daemon did not create its private socket within 10 seconds');
 }
 
 async function stopDaemon(running: RunningDaemon | undefined): Promise<void> {

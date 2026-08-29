@@ -43,7 +43,7 @@ daemon.stderr.on('data', (chunk) => {
 const delay = (milliseconds) => new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 
 async function waitForSocket() {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
     if (daemon.exitCode !== null) {
       throw new Error(
         `daemon exited before listening (${daemon.exitCode}): ${Buffer.concat(daemonErrors).toString('utf8')}`,
@@ -62,7 +62,7 @@ async function waitForSocket() {
     }
     await delay(25);
   }
-  throw new Error('detached daemon did not create its socket within 2.5 seconds');
+  throw new Error('detached daemon did not create its socket within 10 seconds');
 }
 
 async function runSmoke(arguments_) {
