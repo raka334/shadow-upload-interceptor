@@ -1,8 +1,9 @@
 import { defineContentScript } from '#imports';
+import { CONTENT_SCRIPT_MATCHES } from '../bridge/policy';
 import { installUploadGuard } from '../intercept/uploadGuard';
 
 export default defineContentScript({
-  matches: ['http://localhost:4173/*', 'http://127.0.0.1:4173/*'],
+  matches: [...CONTENT_SCRIPT_MATCHES],
   runAt: 'document_start',
   main(ctx) {
     const remove = installUploadGuard();

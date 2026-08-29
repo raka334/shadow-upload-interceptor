@@ -1,6 +1,5 @@
 import { browser } from 'wxt/browser';
 import {
-  allowFailOpen,
   HEALTH_TIMEOUT_MS,
   type HealthCheckResult,
   isNativeHealth,
@@ -10,7 +9,8 @@ import {
   PROTOCOL_VERSION,
   RAW_CHUNK_BYTES,
   type ScanFileRequest,
-  type ScanFileResult,
+  type ScanOutcome,
+  unavailableOutcome,
 } from './protocol';
 
 function encodeBase64(bytes: Uint8Array): string {
@@ -26,12 +26,15 @@ function encodeBase64(bytes: Uint8Array): string {
 }
 
 /** One Native Messaging process and port per scan. Chrome owns the u32 framing. */
-export function scanWithNativeHost(request: ScanFileRequest): Promise<ScanFileResult> {
+export function scanWithNativeHost(
+  request: ScanFileRequest,
+  timeoutMs = NATIVE_TIMEOUT_MS,
+): Promise<ScanOutcome> {
   return new Promise((resolve) => {
     let settled = false;
     let port: ReturnType<typeof browser.runtime.connectNative> | undefined;
 
-    const finish = (result: ScanFileResult) => {
+    const finish = (result: ScanOutcome) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -43,22 +46,22 @@ export function scanWithNativeHost(request: ScanFileRequest): Promise<ScanFileRe
       resolve(result);
     };
 
-    const timer = setTimeout(() => finish(allowFailOpen('timeout')), NATIVE_TIMEOUT_MS);
+    const timer = setTimeout(() => finish(unavailableOutcome('timeout')), timeoutMs);
 
     try {
       port = browser.runtime.connectNative(NATIVE_HOST);
       port.onMessage.addListener((message: unknown) => {
         if (!isNativeVerdict(message, request.scanId)) {
-          finish(allowFailOpen('invalid_response'));
+          finish(unavailableOutcome('invalid_response'));
           return;
         }
         finish({
+          kind: 'verdict',
           decision: message.decision,
           rule: message.rule,
-          failOpen: false,
         });
       });
-      port.onDisconnect.addListener(() => finish(allowFailOpen('host_disconnected')));
+      port.onDisconnect.addListener(() => finish(unavailableOutcome('host_disconnected')));
 
       port.postMessage({
         type: 'scan_begin',
@@ -81,7 +84,7 @@ export function scanWithNativeHost(request: ScanFileRequest): Promise<ScanFileRe
       }
       port.postMessage({ type: 'scan_end', id: request.scanId });
     } catch {
-      finish(allowFailOpen('host_unavailable'));
+      finish(unavailableOutcome('host_unavailable'));
     }
   });
 }

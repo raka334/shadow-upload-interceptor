@@ -36,15 +36,14 @@ jobs:
       - name: Install the E2E browser
         run: pnpm --dir extension exec playwright install --with-deps chromium
 
-      - name: Verify native Rust host
+      - name: Verify broker and detached Rust daemon
         run: |
           cargo fmt --manifest-path daemon/Cargo.toml --check
           cargo clippy --manifest-path daemon/Cargo.toml --all-targets -- -D warnings
           cargo test --manifest-path daemon/Cargo.toml
-          cargo build --manifest-path daemon/Cargo.toml --bin secureintent-shadow-host
-          node scripts/smoke-host.mjs --health
-          node scripts/smoke-host.mjs testdata/block.pem block
-          node scripts/smoke-host.mjs testdata/allow.txt allow
+          cargo build --manifest-path daemon/Cargo.toml \
+            --bin secureintent-shadow-host --bin secureintent-shadow-daemon
+          node scripts/smoke-detached.mjs
 
       - name: Verify install, diagnostics, and uninstall in isolation
         run: ./scripts/test-install.sh "${{ runner.temp }}/secureintent-native-host-test"
@@ -52,7 +51,7 @@ jobs:
       - name: Exercise the real Chromium extension-to-Rust loop
         run: pnpm --dir extension e2e
 
-  tauri-host:
+  detached-tauri-daemon:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -71,24 +70,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev xauth xvfb
 
-      - name: Build and exercise the zero-window Tauri host
+      - name: Build and exercise the detached zero-window Tauri daemon
         run: |
           cargo clippy --manifest-path daemon/Cargo.toml \
             --features tauri-host --bin secureintent-shadow-tauri -- -D warnings
           cargo build --manifest-path daemon/Cargo.toml \
             --features tauri-host --bin secureintent-shadow-tauri
-          xvfb-run -a env SHADOW_HOST_BINARY=daemon/target/debug/secureintent-shadow-tauri \
-            node scripts/smoke-host.mjs --health
-          xvfb-run -a env SHADOW_HOST_BINARY=daemon/target/debug/secureintent-shadow-tauri \
-            node scripts/smoke-host.mjs testdata/block.pem block
-          xvfb-run -a env SHADOW_HOST_BINARY=daemon/target/debug/secureintent-shadow-tauri \
-            node scripts/smoke-host.mjs testdata/allow.txt allow
+          cargo build --manifest-path daemon/Cargo.toml --bin secureintent-shadow-host
+          xvfb-run -a env \
+            SHADOW_DAEMON_BINARY=daemon/target/debug/secureintent-shadow-tauri \
+            node scripts/smoke-detached.mjs
 
-      - name: Exercise Chromium through the Tauri v2 host
+      - name: Exercise Chromium through the detached Tauri v2 daemon
         run: |
           pnpm --dir extension install --frozen-lockfile
           pnpm --dir extension build
           pnpm --dir extension exec playwright install --with-deps chromium
           xvfb-run -a env \
-            SHADOW_E2E_HOST_BINARY=daemon/target/debug/secureintent-shadow-tauri \
+            SHADOW_E2E_DAEMON_BINARY=daemon/target/debug/secureintent-shadow-tauri \
             pnpm --dir extension e2e

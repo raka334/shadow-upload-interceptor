@@ -16,17 +16,20 @@ BROWSER_FLAVOR="chrome"
 SERVER_PID=""
 CHROME_PID=""
 CHROME_PROFILE=""
+DAEMON_PID=""
+DAEMON_SOCKET=""
 
 usage() {
   cat <<'EOF'
-Usage: ./run-demo.sh [--prepare-only] [--tauri-host]
+Usage: ./run-demo.sh [--prepare-only] [--tauri-daemon]
 
-Builds the extension and Rust host, installs the Native Messaging manifest,
-serves Forge, and opens a clean Chrome window with the extension loaded.
+Builds the extension, Native Messaging broker, and detached scanner daemon;
+serves Forge; and opens a clean Chrome window with the extension loaded.
 
 Options:
   --prepare-only  Build and install without starting Forge or Chrome.
-  --tauri-host    Use the zero-window Tauri v2 host (requires Tauri system packages).
+  --tauri-daemon  Use the zero-window Tauri v2 daemon (requires Tauri system packages).
+  --tauri-host    Backward-compatible alias for --tauri-daemon.
   -h, --help      Show this help.
 
 Environment:
@@ -94,7 +97,7 @@ resolve_browser() {
 while (( $# > 0 )); do
   case "$1" in
     --prepare-only) MODE="prepare" ;;
-    --tauri-host) HOST_VARIANT="tauri" ;;
+    --tauri-daemon|--tauri-host) HOST_VARIANT="tauri" ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
   esac
@@ -139,6 +142,11 @@ cleanup() {
   if [[ -n "${CHROME_PID}" ]] && kill -0 "${CHROME_PID}" >/dev/null 2>&1; then
     kill "${CHROME_PID}" >/dev/null 2>&1 || true
     wait "${CHROME_PID}" 2>/dev/null || true
+  fi
+
+  if [[ -n "${DAEMON_PID}" ]] && kill -0 "${DAEMON_PID}" >/dev/null 2>&1; then
+    kill "${DAEMON_PID}" >/dev/null 2>&1 || true
+    wait "${DAEMON_PID}" 2>/dev/null || true
   fi
 
   if [[ -n "${CHROME_PROFILE}" && -d "${CHROME_PROFILE}" ]]; then
@@ -186,14 +194,40 @@ if [[ "${MODE}" == "run" ]]; then
   CHROME_PROFILE="$(mktemp -d "${TMPDIR:-/tmp}/secureintent-shadow-chrome.XXXXXX")"
 fi
 
-echo "[3/4] Building and registering the Rust Native Messaging host (${HOST_VARIANT})..."
+echo "[3/4] Building the broker and detached Rust daemon (${HOST_VARIANT})..."
 if [[ "${MODE}" == "run" ]]; then
-  SHADOW_NATIVE_HOST_DIR="${CHROME_PROFILE}/NativeMessagingHosts" \
+  DAEMON_SOCKET="${CHROME_PROFILE}/secureintent-shadow.sock"
+  SHADOW_SERVICE_MODE="ephemeral" \
+    SHADOW_NATIVE_HOST_DIR="${CHROME_PROFILE}/NativeMessagingHosts" \
     "${SCRIPT_DIR}/scripts/install-host.sh" \
       "${EXTENSION_ID}" "${BROWSER_FLAVOR}" "${HOST_VARIANT}"
 else
   "${SCRIPT_DIR}/scripts/install-host.sh" \
     "${EXTENSION_ID}" "${BROWSER_FLAVOR}" "${HOST_VARIANT}"
+fi
+
+if [[ "${MODE}" == "run" ]]; then
+  if [[ "${HOST_VARIANT}" == "tauri" ]]; then
+    DAEMON_BINARY="${SCRIPT_DIR}/daemon/target/release/secureintent-shadow-tauri"
+  else
+    DAEMON_BINARY="${SCRIPT_DIR}/daemon/target/release/secureintent-shadow-daemon"
+  fi
+  SECUREINTENT_SHADOW_SOCKET="${DAEMON_SOCKET}" "${DAEMON_BINARY}" \
+    2>"${CHROME_PROFILE}/daemon.stderr.log" &
+  DAEMON_PID=$!
+  for _attempt in {1..50}; do
+    [[ -S "${DAEMON_SOCKET}" ]] && break
+    if ! kill -0 "${DAEMON_PID}" >/dev/null 2>&1; then
+      echo "Detached scanner daemon stopped before it became ready." >&2
+      sed -n '1,80p' "${CHROME_PROFILE}/daemon.stderr.log" >&2
+      exit 1
+    fi
+    sleep 0.1
+  done
+  if [[ ! -S "${DAEMON_SOCKET}" ]]; then
+    echo "Detached scanner daemon did not create its private socket." >&2
+    exit 1
+  fi
 fi
 
 if [[ "${MODE}" == "prepare" ]]; then
@@ -237,10 +271,11 @@ echo "SecureIntent Shadow Upload is running."
 echo "Extension ID: ${EXTENSION_ID}"
 echo "Forge:        ${DEMO_URL}"
 echo "Browser:      $("${DEMO_CHROME_BIN}" --version)"
-echo "Try:          testdata/allow.txt, then testdata/block.pem"
+echo "Daemon PID:   ${DAEMON_PID} (independent of Chrome's broker processes)"
+echo "Try:          testdata/allow.txt, testdata/block.pem, testdata/oversized-8mb.txt"
 echo "Close the demo Chrome window or press Ctrl+C to stop."
 
-"${DEMO_CHROME_BIN}" \
+SECUREINTENT_SHADOW_SOCKET="${DAEMON_SOCKET}" "${DEMO_CHROME_BIN}" \
   --user-data-dir="${CHROME_PROFILE}" \
   --disable-extensions-except="${EXTENSION_OUTPUT}" \
   --load-extension="${EXTENSION_OUTPUT}" \

@@ -13,7 +13,7 @@ use crate::{
 };
 
 // A 256 KiB raw chunk becomes about 342 KiB of base64 plus a small JSON envelope.
-const MAX_FRAME_BYTES: usize = 512 * 1024;
+pub(crate) const MAX_FRAME_BYTES: usize = 512 * 1024;
 pub const PROTOCOL_VERSION: u16 = 1;
 const MAX_IDENTIFIER_BYTES: usize = 64;
 const MAX_FILENAME_BYTES: usize = 512;
@@ -78,7 +78,9 @@ pub enum ProtocolError {
     InvalidSession(#[from] SessionError),
 }
 
-fn read_frame<R: Read>(reader: &mut R) -> Result<Option<Zeroizing<Vec<u8>>>, ProtocolError> {
+pub(crate) fn read_frame<R: Read>(
+    reader: &mut R,
+) -> Result<Option<Zeroizing<Vec<u8>>>, ProtocolError> {
     let mut length = [0_u8; 4];
     match reader.read(&mut length[..1])? {
         0 => return Ok(None),
@@ -95,13 +97,23 @@ fn read_frame<R: Read>(reader: &mut R) -> Result<Option<Zeroizing<Vec<u8>>>, Pro
     Ok(Some(payload))
 }
 
-fn write_frame<W: Write, T: Serialize>(writer: &mut W, message: &T) -> Result<(), ProtocolError> {
-    let payload = serde_json::to_vec(message)?;
+pub(crate) fn write_payload_frame<W: Write>(
+    writer: &mut W,
+    payload: &[u8],
+) -> Result<(), ProtocolError> {
+    if payload.is_empty() || payload.len() > MAX_FRAME_BYTES {
+        return Err(ProtocolError::InvalidFrameLength);
+    }
     let length = u32::try_from(payload.len()).map_err(|_| ProtocolError::InvalidFrameLength)?;
     writer.write_all(&length.to_le_bytes())?;
-    writer.write_all(&payload)?;
+    writer.write_all(payload)?;
     writer.flush()?;
     Ok(())
+}
+
+fn write_frame<W: Write, T: Serialize>(writer: &mut W, message: &T) -> Result<(), ProtocolError> {
+    let payload = serde_json::to_vec(message)?;
+    write_payload_frame(writer, &payload)
 }
 
 fn validate_identifier(id: &str) -> Result<(), ProtocolError> {
@@ -123,7 +135,7 @@ fn validate_filename(name: &str) -> Result<(), ProtocolError> {
     Ok(())
 }
 
-pub fn run_native_host<R: Read, W: Write>(
+pub fn run_scanner_protocol<R: Read, W: Write>(
     mut reader: R,
     mut writer: W,
 ) -> Result<(), ProtocolError> {
@@ -203,7 +215,7 @@ mod tests {
 
     use super::{
         MAX_FILENAME_BYTES, MAX_FRAME_BYTES, PROTOCOL_VERSION, ProtocolError, read_frame,
-        run_native_host,
+        run_scanner_protocol,
     };
     use crate::session::SessionError;
 
@@ -256,7 +268,7 @@ mod tests {
         append_scan(&mut input, "scan-1", "renamed.txt", bytes);
 
         let mut output = Vec::new();
-        run_native_host(Cursor::new(input), &mut output).expect("protocol should complete");
+        run_scanner_protocol(Cursor::new(input), &mut output).expect("protocol should complete");
 
         let responses = decode_responses(output);
         assert_eq!(
@@ -283,7 +295,8 @@ mod tests {
         );
 
         let mut output = Vec::new();
-        run_native_host(Cursor::new(input), &mut output).expect("health checks should complete");
+        run_scanner_protocol(Cursor::new(input), &mut output)
+            .expect("health checks should complete");
 
         assert_eq!(
             decode_responses(output),
@@ -321,7 +334,7 @@ mod tests {
         );
 
         let mut output = Vec::new();
-        run_native_host(Cursor::new(input), &mut output).expect("both scans should complete");
+        run_scanner_protocol(Cursor::new(input), &mut output).expect("both scans should complete");
 
         assert_eq!(
             decode_responses(output),
@@ -374,7 +387,7 @@ mod tests {
         invalid_json.extend_from_slice(&(payload.len() as u32).to_le_bytes());
         invalid_json.extend_from_slice(payload);
         assert!(matches!(
-            run_native_host(Cursor::new(invalid_json), Vec::new()),
+            run_scanner_protocol(Cursor::new(invalid_json), Vec::new()),
             Err(ProtocolError::InvalidJson(_))
         ));
 
@@ -389,7 +402,7 @@ mod tests {
             }),
         );
         assert!(matches!(
-            run_native_host(Cursor::new(unknown_field), Vec::new()),
+            run_scanner_protocol(Cursor::new(unknown_field), Vec::new()),
             Err(ProtocolError::InvalidJson(_))
         ));
     }
@@ -402,7 +415,7 @@ mod tests {
             json!({ "type": "health", "id": "bad/id", "protocol": PROTOCOL_VERSION }),
         );
         assert!(matches!(
-            run_native_host(Cursor::new(invalid_identifier), Vec::new()),
+            run_scanner_protocol(Cursor::new(invalid_identifier), Vec::new()),
             Err(ProtocolError::InvalidIdentifier)
         ));
 
@@ -418,7 +431,7 @@ mod tests {
             }),
         );
         assert!(matches!(
-            run_native_host(Cursor::new(invalid_filename), Vec::new()),
+            run_scanner_protocol(Cursor::new(invalid_filename), Vec::new()),
             Err(ProtocolError::InvalidFilename)
         ));
 
@@ -434,7 +447,7 @@ mod tests {
             }),
         );
         assert!(matches!(
-            run_native_host(Cursor::new(oversized_filename), Vec::new()),
+            run_scanner_protocol(Cursor::new(oversized_filename), Vec::new()),
             Err(ProtocolError::InvalidFilename)
         ));
     }
@@ -444,7 +457,8 @@ mod tests {
         let mut input = Vec::new();
         append_scan(&mut input, "scan", "a-\"quoted\"-name.txt", b"safe");
         let mut output = Vec::new();
-        run_native_host(Cursor::new(input), &mut output).expect("escaped filename should work");
+        run_scanner_protocol(Cursor::new(input), &mut output)
+            .expect("escaped filename should work");
         assert_eq!(
             decode_responses(output),
             vec![json!({
@@ -474,7 +488,7 @@ mod tests {
             json!({ "type": "scan_chunk", "id": "id", "offset": 0, "data": "%%%" }),
         );
         assert!(matches!(
-            run_native_host(Cursor::new(invalid_base64), Vec::new()),
+            run_scanner_protocol(Cursor::new(invalid_base64), Vec::new()),
             Err(ProtocolError::InvalidSession(SessionError::InvalidBase64))
         ));
 
@@ -490,7 +504,7 @@ mod tests {
             }),
         );
         assert!(matches!(
-            run_native_host(Cursor::new(wrong_protocol), Vec::new()),
+            run_scanner_protocol(Cursor::new(wrong_protocol), Vec::new()),
             Err(ProtocolError::UnsupportedProtocol)
         ));
     }

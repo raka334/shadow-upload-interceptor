@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'vitest';
 import {
-  allowFailOpen,
   isNativeHealth,
   isNativeVerdict,
   isRuleId,
@@ -8,6 +7,7 @@ import {
   MAX_FILE_BYTES,
   PROTOCOL_VERSION,
   RULE_IDS,
+  unavailableOutcome,
 } from './protocol';
 
 describe('extension bridge protocol', () => {
@@ -111,13 +111,8 @@ describe('extension bridge protocol', () => {
     ).toBe(false);
   });
 
-  test('fail-open results never claim a rule match', () => {
-    expect(allowFailOpen('timeout')).toEqual({
-      decision: 'allow',
-      rule: null,
-      failOpen: true,
-      reason: 'timeout',
-    });
+  test('transport failures remain distinct from scanner verdicts', () => {
+    expect(unavailableOutcome('timeout')).toEqual({ kind: 'unavailable', reason: 'timeout' });
     expect(MAX_FILE_BYTES).toBe(8 * 1024 * 1024);
   });
 });

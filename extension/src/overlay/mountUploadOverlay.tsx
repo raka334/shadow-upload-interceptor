@@ -1,11 +1,13 @@
 import { createRoot } from 'react-dom/client';
-import type { RuleId } from '../bridge/protocol';
 import { overlayStyles } from './styles';
-import { UploadBlocked } from './UploadBlocked';
+import { type UploadBlockCause, UploadBlocked } from './UploadBlocked';
 
 let removeActive: (() => void) | null = null;
 
-export function mountUploadOverlay(filename: string, rule: RuleId): { remove: () => void } {
+export function mountUploadOverlay(
+  filename: string,
+  cause: UploadBlockCause,
+): { remove: () => void } {
   removeActive?.();
 
   const previouslyFocused =
@@ -33,6 +35,6 @@ export function mountUploadOverlay(filename: string, rule: RuleId): { remove: ()
     if (removeActive === remove) removeActive = null;
   };
   removeActive = remove;
-  root.render(<UploadBlocked filename={filename} rule={rule} onDismiss={remove} />);
+  root.render(<UploadBlocked filename={filename} cause={cause} onDismiss={remove} />);
   return { remove };
 }

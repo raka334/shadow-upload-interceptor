@@ -1,3 +1,4 @@
+import { type ChildProcess, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   chmodSync,
@@ -6,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,6 +25,18 @@ interface RunningExtension {
   profile: string;
 }
 
+interface RunningDaemon {
+  process: ChildProcess;
+  directory: string;
+  socketPath: string;
+  stderr: Buffer[];
+}
+
+interface GuardPolicyOverride {
+  onUnavailable?: 'allow' | 'block';
+  onTooLarge?: 'allow' | 'block';
+}
+
 function deriveExtensionId(): string {
   const manifest = JSON.parse(readFileSync(resolve(extensionPath, 'manifest.json'), 'utf8')) as {
     key?: unknown;
@@ -37,7 +51,23 @@ function deriveExtensionId(): string {
   }).join('');
 }
 
-async function launchExtension(hostBinary?: string): Promise<RunningExtension> {
+async function setGuardPolicy(context: BrowserContext, policy: GuardPolicyOverride): Promise<void> {
+  const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'));
+  await worker.evaluate(async (guardPolicy) => {
+    const extensionApi = (
+      globalThis as unknown as {
+        chrome: { storage: { local: { set: (items: Record<string, unknown>) => Promise<void> } } };
+      }
+    ).chrome;
+    await extensionApi.storage.local.set({ guardPolicy });
+  }, policy);
+}
+
+async function launchExtension(
+  hostBinary?: string,
+  policy?: GuardPolicyOverride,
+  daemonSocket?: string,
+): Promise<RunningExtension> {
   const profile = mkdtempSync(join(tmpdir(), 'secureintent-shadow-e2e.'));
   try {
     if (hostBinary) {
@@ -65,6 +95,9 @@ async function launchExtension(hostBinary?: string): Promise<RunningExtension> {
     const executablePath = process.env.SHADOW_E2E_CHROME_BIN;
     const context = await chromium.launchPersistentContext(profile, {
       ...(executablePath ? { executablePath } : { channel: 'chromium' }),
+      ...(daemonSocket
+        ? { env: { ...process.env, SECUREINTENT_SHADOW_SOCKET: daemonSocket } }
+        : {}),
       headless: process.env.SHADOW_E2E_HEADED !== '1',
       args: [
         `--disable-extensions-except=${extensionPath}`,
@@ -73,10 +106,72 @@ async function launchExtension(hostBinary?: string): Promise<RunningExtension> {
         '--no-default-browser-check',
       ],
     });
+    if (policy) await setGuardPolicy(context, policy);
     return { context, profile };
   } catch (error) {
     rmSync(profile, { recursive: true, force: true });
     throw error;
+  }
+}
+
+async function startDaemon(): Promise<RunningDaemon> {
+  const directory = mkdtempSync(join(tmpdir(), 'secureintent-shadow-daemon-e2e.'));
+  const socketPath = join(directory, 'daemon.sock');
+  const daemonBinary = resolve(
+    repoRoot,
+    process.env.SHADOW_E2E_DAEMON_BINARY ?? 'daemon/target/debug/secureintent-shadow-daemon',
+  );
+  chmodSync(daemonBinary, 0o755);
+  const stderr: Buffer[] = [];
+  const daemon = spawn(daemonBinary, [], {
+    env: { ...process.env, SECUREINTENT_SHADOW_SOCKET: socketPath },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  daemon.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk));
+
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (daemon.exitCode !== null) {
+      rmSync(directory, { recursive: true, force: true });
+      throw new Error(
+        `detached daemon exited before listening (${daemon.exitCode}): ${Buffer.concat(stderr).toString('utf8')}`,
+      );
+    }
+    try {
+      const metadata = statSync(socketPath);
+      if (metadata.isSocket()) {
+        expect(metadata.mode & 0o777).toBe(0o600);
+        return { process: daemon, directory, socketPath, stderr };
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+  }
+
+  daemon.kill('SIGKILL');
+  rmSync(directory, { recursive: true, force: true });
+  throw new Error('detached daemon did not create its private socket within 2.5 seconds');
+}
+
+async function stopDaemon(running: RunningDaemon | undefined): Promise<void> {
+  if (!running) return;
+  try {
+    if (running.process.exitCode === null) {
+      const closed = new Promise<void>((resolveClose) =>
+        running.process.once('close', () => resolveClose()),
+      );
+      running.process.kill('SIGTERM');
+      const stopped = await Promise.race([
+        closed.then(() => true),
+        new Promise<false>((resolveDelay) => setTimeout(() => resolveDelay(false), 1_000)),
+      ]);
+      if (!stopped && running.process.exitCode === null) {
+        running.process.kill('SIGKILL');
+        await closed;
+      }
+    }
+  } finally {
+    rmSync(running.directory, { recursive: true, force: true });
   }
 }
 
@@ -161,17 +256,21 @@ async function expectBlocked(page: Page): Promise<void> {
       .locator('input[type=file]')
       .evaluate((input: HTMLInputElement) => input.files?.length),
   ).toBe(0);
+  const publicStatus = await page.locator('html').getAttribute('data-secureintent-status');
+  expect(publicStatus).toBe('{"state":"blocked"}');
 }
 
 test.describe('protected upload loop', () => {
   test.describe.configure({ mode: 'serial' });
   let running: RunningExtension | undefined;
+  let daemon: RunningDaemon | undefined;
   let fixtureDirectory: string;
 
   test.beforeAll(async () => {
+    daemon = await startDaemon();
     const hostBinary =
       process.env.SHADOW_E2E_HOST_BINARY ?? 'daemon/target/debug/secureintent-shadow-host';
-    running = await launchExtension(hostBinary);
+    running = await launchExtension(hostBinary, undefined, daemon.socketPath);
     fixtureDirectory = mkdtempSync(join(tmpdir(), 'secureintent-shadow-fixtures.'));
     copyFileSync(
       resolve(repoRoot, 'testdata/block.pem'),
@@ -186,8 +285,17 @@ test.describe('protected upload loop', () => {
   test.afterAll(async () => {
     try {
       await closeExtension(running);
+      if (daemon && daemon.process.exitCode !== null) {
+        throw new Error(
+          `detached daemon exited with Chrome: ${Buffer.concat(daemon?.stderr ?? []).toString('utf8')}`,
+        );
+      }
     } finally {
-      if (fixtureDirectory) rmSync(fixtureDirectory, { recursive: true, force: true });
+      try {
+        await stopDaemon(daemon);
+      } finally {
+        if (fixtureDirectory) rmSync(fixtureDirectory, { recursive: true, force: true });
+      }
     }
   });
 
@@ -216,28 +324,63 @@ test.describe('protected upload loop', () => {
     await page.close();
   });
 
-  test('allows over-limit files explicitly without sending them to the host', async () => {
+  test('blocks over-limit files by default without sending them to the daemon', async () => {
     const page = await openForge(requireContext(running), 'active');
     const oversized = join(fixtureDirectory, `${randomUUID()}.bin`);
     writeFileSync(oversized, Buffer.alloc(8 * 1024 * 1024 + 1, 0x61));
     await chooseFile(page, oversized);
-    await expectAllowed(page, basename(oversized));
-    await expect(page.locator('#status-detail')).toContainText(
-      'exceeded the 8 MiB demo scan limit',
-    );
+    await expectBlocked(page);
+    await expect(page.locator('html')).toHaveAttribute('data-secureintent-guard', 'active');
     await page.close();
   });
 });
 
-test('fails open when the native host is absent', async () => {
+test('fails closed by default when the native host is absent', async () => {
   const running = await launchExtension();
   try {
     const page = await openForge(running.context, 'degraded');
     await chooseFile(page, resolve(repoRoot, 'testdata/block.pem'));
-    await expectAllowed(page, 'block.pem');
-    await expect(page.locator('#status-detail')).toContainText('Local scanner unavailable');
+    await expectBlocked(page);
     await expect(page.locator('html')).toHaveAttribute('data-secureintent-guard', 'degraded');
   } finally {
     await closeExtension(running);
+  }
+});
+
+test('supports an explicit fail-open development policy', async () => {
+  const missingDaemonDirectory = mkdtempSync(join(tmpdir(), 'secureintent-shadow-missing-daemon.'));
+  const hostBinary =
+    process.env.SHADOW_E2E_HOST_BINARY ?? 'daemon/target/debug/secureintent-shadow-host';
+  const running = await launchExtension(
+    hostBinary,
+    {
+      onUnavailable: 'allow',
+      onTooLarge: 'allow',
+    },
+    join(missingDaemonDirectory, 'missing.sock'),
+  );
+  const fixtureDirectory = mkdtempSync(join(tmpdir(), 'secureintent-shadow-policy.'));
+  try {
+    const unavailablePage = await openForge(running.context, 'degraded');
+    await chooseFile(unavailablePage, resolve(repoRoot, 'testdata/allow.txt'));
+    await expectAllowed(unavailablePage, 'allow.txt');
+    await expect(unavailablePage.locator('#status-detail')).toContainText(
+      'local scanning was unavailable',
+    );
+    await unavailablePage.close();
+
+    const oversized = join(fixtureDirectory, `${randomUUID()}.bin`);
+    writeFileSync(oversized, Buffer.alloc(8 * 1024 * 1024 + 1, 0x61));
+    const oversizedPage = await openForge(running.context, 'degraded');
+    await chooseFile(oversizedPage, oversized);
+    await expectAllowed(oversizedPage, basename(oversized));
+    await oversizedPage.close();
+  } finally {
+    try {
+      await closeExtension(running);
+    } finally {
+      rmSync(fixtureDirectory, { recursive: true, force: true });
+      rmSync(missingDaemonDirectory, { recursive: true, force: true });
+    }
   }
 });

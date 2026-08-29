@@ -39,6 +39,17 @@ export interface ScanFileResult {
   reason?: ScanFailureReason;
 }
 
+export type ScanOutcome =
+  | {
+      kind: 'verdict';
+      decision: 'allow' | 'block';
+      rule: RuleId | null;
+    }
+  | {
+      kind: 'unavailable';
+      reason: ScanFailureReason;
+    };
+
 export type NativeRequest =
   | { type: 'health'; id: string; protocol: number }
   | { type: 'scan_begin'; id: string; name: string; size: number; protocol: number }
@@ -121,6 +132,6 @@ export function isNativeHealth(value: unknown, id: string): value is NativeHealt
   );
 }
 
-export function allowFailOpen(reason: ScanFailureReason): ScanFileResult {
-  return { decision: 'allow', rule: null, failOpen: true, reason };
+export function unavailableOutcome(reason: ScanFailureReason): ScanOutcome {
+  return { kind: 'unavailable', reason };
 }

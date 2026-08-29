@@ -26,7 +26,11 @@ function acceptFile(file) {
   receivedName.textContent = file.name;
   receivedSize.textContent = formatBytes(file.size);
   received.hidden = false;
-  setStatus('allowed', 'Allowed — uploaded', `${file.name} was received by Forge.`);
+  const detail =
+    document.documentElement.dataset.secureintentGuard === 'degraded'
+      ? `${file.name} was received while local scanning was unavailable.`
+      : `${file.name} was received by Forge.`;
+  setStatus('allowed', 'Allowed — uploaded', detail);
 }
 
 input.addEventListener('change', () => acceptFile(input.files?.[0]));
@@ -60,18 +64,19 @@ function applySecureIntentStatus(rawStatus) {
   } catch {
     return;
   }
-  const { state, filename, detail } = status;
+  const { state } = status;
   dropZone.classList.remove('is-dragging');
   if (state === 'scanning') {
     received.hidden = true;
-    setStatus('scanning', 'Scanning locally…', `${filename} has not been sent to Forge.`);
+    setStatus('scanning', 'Scanning locally…', 'The selected file has not been sent to Forge.');
   }
   if (state === 'blocked') {
     received.hidden = true;
-    setStatus('blocked', 'Blocked — not sent', `${filename} was stopped before Forge received it.`);
+    setStatus('blocked', 'Blocked — not sent', 'The selected file was stopped before Forge received it.');
   }
-  if (state === 'allowed' && detail) {
-    statusDetail.textContent = detail;
+  if (state === 'canceled') {
+    received.hidden = true;
+    setStatus('blocked', 'Upload canceled', 'The original upload control is no longer available.');
   }
 }
 
