@@ -206,7 +206,8 @@ Native Messaging broker sessions.
 
 Tauri is a real independent executable, not a compile-time label on the Chrome-owned broker. It has
 no window or web frontend. Tauri owns the main-thread application lifecycle while a named Rust OS
-thread starts the persistent AF_UNIX accept loop without depending on a GUI-ready event. On
+thread binds the persistent AF_UNIX listener before desktop-runtime initialization, so protection
+readiness does not wait for GTK desktop services or a GUI-ready event. On
 Debian-family Linux, including Kali:
 
 ```bash

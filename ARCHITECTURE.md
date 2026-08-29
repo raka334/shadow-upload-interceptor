@@ -171,8 +171,9 @@ The Rust library is exposed through three deliberately narrow executables:
   process, from `connectNative` until the port closes.
 - `secureintent-shadow-daemon` is a dependency-light listener for the default demo and CI.
 - `secureintent-shadow-tauri` is the assessed zero-window Tauri v2 listener. Tauri owns the
-  main-thread application lifecycle while a named Rust OS thread owns the blocking AF_UNIX accept
-  loop without waiting for a GUI-ready event.
+  main-thread application lifecycle while a named Rust OS thread binds and owns the blocking
+  AF_UNIX accept loop before desktop-runtime initialization. Listener readiness therefore does not
+  wait for GTK desktop services or a GUI-ready event.
 
 The two daemon entrypoints call the same `run_daemon()` library entrypoint, so IPC authorization,
 protocol validation, scanning, and zeroization cannot drift. The default demo remains
