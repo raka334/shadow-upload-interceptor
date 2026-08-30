@@ -3,7 +3,8 @@
 **Files are inspected locally before release. The detached daemon returns only Block or Allow, and
 policy decides what happens when scanning is unavailable.**
 
-This repository is a production-shaped vertical slice of SecureIntent's upload boundary: a polished
+This repository is a production-shaped vertical slice of SecureIntent's upload boundary. It supports
+both Linux and macOS with the same extension, Rust broker, and detached scanner daemon: a polished
 dummy AI destination, a Chrome MV3 extension built with WXT/React/TypeScript, a short-lived Rust
 Native Messaging broker, and an independently managed Rust scanner daemon. The assessed daemon is
 also shipped as a zero-window Tauri v2 executable. Chrome can exit while that daemon PID and its
@@ -45,27 +46,54 @@ internal warning UI, and removing the host element cannot recover a file that wa
 
 ## Prerequisites
 
-- Google Chrome 148+ for manual loading; Chrome for Testing or Chromium 148+ for `run-demo.sh`
-- Node.js 22 or newer (`run-demo.sh` uses pnpm 10 from `PATH` or bootstraps it through `npx`)
-- Rust 1.85 or newer
-- A systemd user session (Linux) or launchd user session (macOS) for persistent manual installation
-- Tauri path only: Tauri v2 platform prerequisites (on Debian-family Linux, `libwebkit2gtk-4.1-dev`)
+- Google Chrome 148+ for manual loading. The disposable launchers support Chrome for Testing or
+  Chromium 148+ on Linux and macOS.
+- Node.js 22 or newer. The launchers select the pinned pnpm 10.28.2 automatically; a global pnpm
+  installation is not required.
+- Rust 1.85 or newer.
+- Linux persistent install: a systemd user session. macOS persistent install: a launchd user session.
+- Tauri path only: Tauri v2 platform prerequisites. On Debian-family Linux, install
+  `libwebkit2gtk-4.1-dev`.
 
 Chrome 148 is intentional: the extension opts into structured-clone messaging so a `Uint8Array`
 can be copied from the content script to the MV3 worker without converting the file to base64 in
 the page context. Native Messaging remains JSON and is base64-chunked only at that boundary.
 
-## One-command assessed demo
+## One-command demo
 
-The official Part 1 path uses the actual Tauri v2 daemon. On Debian-family Linux, including Kali,
-install its native dependency once and run:
+The launchers build everything locally, use a fresh browser profile, and remove their temporary
+runtime state on exit. They never require a pre-installed pnpm version or an explicit browser path
+when a supported browser is installed in a standard location.
+
+Linux, dependency-light daemon:
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y libwebkit2gtk-4.1-dev
 chmod +x run-demo.sh
+./run-demo.sh
+```
+
+Linux, assessed detached Tauri daemon (Debian/Kali first):
+
+```bash
+sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev
 ./run-demo.sh --tauri-daemon
 ```
+
+macOS (Chrome for Testing or Chromium is auto-discovered):
+
+```bash
+chmod +x run-macos.sh
+./run-macos.sh
+```
+
+Use `./run-macos.sh --tauri-daemon` to exercise the detached Tauri executable on macOS. If browser
+auto-discovery cannot find a compatible binary, install one into the Playwright cache with:
+
+```bash
+corepack pnpm@10.28.2 --dir extension exec playwright install chromium
+```
+
+You can override discovery for either launcher with `DEMO_CHROME_BIN=/absolute/path/to/browser`.
 
 The launcher installs pnpm dependencies, builds the WXT extension, builds and registers the Rust
 broker and zero-window Tauri daemon, serves Forge on port 4173, and opens a fresh temporary Chrome
@@ -74,10 +102,11 @@ registers only the small broker; the separate Tauri process owns the private lis
 Chrome may create and terminate brokers without owning the daemon lifecycle.
 
 The launcher discovers compatible Playwright/Puppeteer browser caches or accepts
-`DEMO_CHROME_BIN=/path/to/chrome`. It cleans up its temporary daemon when the demo ends; manual
-installation uses a persistent user service. For a quick dependency-light check of the identical
-scanner/protocol core, use `./run-demo.sh`; that variant substitutes the standalone Rust daemon for
-the assessed Tauri executable.
+`DEMO_CHROME_BIN=/path/to/chrome`. On macOS it places the disposable profile, Native Messaging
+manifest, socket, and service state under a short `/tmp/secureintent-shadow-*` path so Unix socket
+limits are respected. Linux uses the normal temporary-directory location. Manual installation uses
+a persistent user service. The default launcher substitutes the standalone Rust daemon for the
+assessed Tauri executable; pass `--tauri-daemon` for the official Part 1 path.
 
 On macOS, `./run-macos.sh` is a small wrapper that finds Chrome for Testing or Chromium in the
 standard application and Playwright-cache paths, checks version 148+, then delegates to
@@ -102,11 +131,13 @@ To build and register the Tauri variant without opening Chrome, use
 ## Manual setup
 
 ```bash
-git clone https://github.com/0xkaushik-ai/shadow-upload-interceptor.git && cd shadow-upload-interceptor
+git clone https://github.com/raka334/shadow-upload-interceptor.git
+cd shadow-upload-interceptor
 ```
 
 ```bash
-cd extension && pnpm install && pnpm build && cd ..
+corepack pnpm@10.28.2 --dir extension install
+corepack pnpm@10.28.2 --dir extension build
 ```
 
 In `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select:
@@ -137,25 +168,24 @@ http://localhost:4173
 ```
 
 The installer registers `secureintent-shadow-host`, the short-lived broker, by writing its absolute
-path plus the exact extension origin to:
+path plus the exact extension origin to the browser-specific location below:
 
-```text
-~/.config/google-chrome/NativeMessagingHosts/com.secureintent.shadow.json
-```
+| Platform/browser | Native Messaging manifest |
+|---|---|
+| Linux / Google Chrome | `~/.config/google-chrome/NativeMessagingHosts/com.secureintent.shadow.json` |
+| Linux / Chromium | `~/.config/chromium/NativeMessagingHosts/com.secureintent.shadow.json` |
+| macOS / Google Chrome | `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.secureintent.shadow.json` |
+| macOS / Chrome for Testing | `~/Library/Application Support/Google/Chrome for Testing/NativeMessagingHosts/com.secureintent.shadow.json` |
+| macOS / Chromium | `~/Library/Application Support/Chromium/NativeMessagingHosts/com.secureintent.shadow.json` |
 
-Chromium uses `~/.config/chromium/NativeMessagingHosts/` on Linux. On macOS, Google Chrome uses
-`~/Library/Application Support/Google/Chrome/NativeMessagingHosts/`, Chrome for Testing uses
-`~/Library/Application Support/Google/Chrome for Testing/NativeMessagingHosts/`, and Chromium uses
-`~/Library/Application Support/Chromium/NativeMessagingHosts/`.
-
-On Linux it writes and enables
-`~/.config/systemd/user/com.secureintent.shadow.service`; on macOS it atomically writes
-`~/Library/LaunchAgents/com.secureintent.shadow.plist` (mode `0600`) and bootstraps it with
-`launchctl`. The service owns either `secureintent-shadow-tauri` or
-`secureintent-shadow-daemon`, which listens at `$XDG_RUNTIME_DIR/secureintent-shadow/daemon.sock`
-on Linux or `~/Library/Caches/secureintent-shadow/daemon.sock` on macOS. The runtime directory is `0700`, the socket is
-`0600`, and both sides verify same-user peer credentials (`SO_PEERCRED` on Linux and `getpeereid`
-on macOS).
+The service manager is platform-specific: Linux uses
+`~/.config/systemd/user/com.secureintent.shadow.service`; macOS uses the mode-`0600`
+`~/Library/LaunchAgents/com.secureintent.shadow.plist` bootstrapped with `launchctl`. The service
+owns either `secureintent-shadow-tauri` or `secureintent-shadow-daemon`, which listens at
+`$XDG_RUNTIME_DIR/secureintent-shadow/daemon.sock` on Linux or
+`~/Library/Caches/secureintent-shadow/daemon.sock` on macOS. The runtime directory is `0700`, the
+socket is `0600`, and both sides verify same-user peer credentials (`SO_PEERCRED` on Linux and
+`getpeereid` on macOS).
 
 The registration is written atomically with mode `0600`, pins one exact extension origin, and is
 validated after installation. Diagnose or remove the complete broker/service registration with:
@@ -168,6 +198,11 @@ validated after installation. Diagnose or remove the complete broker/service reg
 `doctor.sh` checks the manifest, broker, service, socket permissions, and service PID; then it runs
 Health, Block, and Allow through three separate brokers and confirms that the daemon PID survived.
 Uninstall disables/removes the service, manifest, and stale socket. Built binaries remain intact.
+
+The checked-in workflow, [`.github/workflows/part1.yml`](.github/workflows/part1.yml), runs on every
+push, pull request, or manual dispatch. It verifies Linux and macOS native hosts, builds the Tauri
+daemon on both platforms, runs the extension and browser tests, and publishes macOS executables as
+an archive with executable permissions preserved.
 
 ## Tests
 
@@ -186,7 +221,9 @@ node scripts/smoke-detached.mjs
 ```
 
 ```bash
-cd extension && pnpm test && pnpm compile && pnpm build
+corepack pnpm@10.28.2 --dir extension test
+corepack pnpm@10.28.2 --dir extension compile
+corepack pnpm@10.28.2 --dir extension build
 ```
 
 The real-browser suite launches a fresh Chromium profile and checks picker and trusted drag/drop
@@ -195,8 +232,8 @@ allow-on-failure and block-on-failure behavior:
 
 ```bash
 cd extension
-pnpm exec playwright install chromium
-pnpm e2e
+corepack pnpm@10.28.2 exec playwright install chromium
+corepack pnpm@10.28.2 e2e
 ```
 
 Rust tests cover every registered rule, strict framing, protocol versioning, split markers,

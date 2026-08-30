@@ -104,9 +104,9 @@ pub fn socket_path() -> Result<PathBuf, IpcError> {
         let runtime_directory = env::var_os("XDG_RUNTIME_DIR")
             .filter(|value| !value.is_empty())
             .ok_or(IpcError::MissingRuntimeDirectory)?;
-        return Ok(PathBuf::from(runtime_directory)
+        Ok(PathBuf::from(runtime_directory)
             .join(SOCKET_DIRECTORY_NAME)
-            .join(SOCKET_FILENAME));
+            .join(SOCKET_FILENAME))
     }
 
     #[cfg(target_os = "macos")]
