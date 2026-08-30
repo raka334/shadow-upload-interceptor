@@ -15,7 +15,7 @@ private Unix listener remain alive. No file bytes are sent to a cloud service.
 |---|---|
 | WXT upload interception | A `document_start` content script synchronously captures ordinary file inputs and trusted drag/drop before page handlers run |
 | Browser-to-OS bridge | The MV3 worker uses an origin-pinned Chrome Native Messaging broker; no localhost TCP or WebSocket listener exists |
-| Detached Tauri listener | A zero-window Tauri v2 process owns the persistent scanner loop independently of Chrome; manual installation is managed by a systemd user service |
+| Detached Tauri listener | A zero-window Tauri v2 process owns the persistent scanner loop independently of Chrome; manual installation uses systemd on Linux or launchd on macOS |
 | Raw byte boundary | `File.arrayBuffer()` becomes `Uint8Array`; bounded chunks are base64-encoded only where Native Messaging's JSON protocol requires it |
 | Mock secret scan | Rust scans byte content for PEM private-key markers and AWS-style access-key identifiers, regardless of filename |
 | Volatile, zeroizing memory | The broker and daemon never write file data to disk and scrub their directly owned file-content frames, decoded chunks, and aggregate scan buffer with `zeroize` |
@@ -48,8 +48,8 @@ internal warning UI, and removing the host element cannot recover a file that wa
 - Google Chrome 148+ for manual loading; Chrome for Testing or Chromium 148+ for `run-demo.sh`
 - Node.js 22 or newer (`run-demo.sh` uses pnpm 10 from `PATH` or bootstraps it through `npx`)
 - Rust 1.85 or newer
-- A Linux systemd user session for persistent manual installation
-- Tauri path only: Tauri v2 Linux packages, including `libwebkit2gtk-4.1-dev`
+- A systemd user session (Linux) or launchd user session (macOS) for persistent manual installation
+- Tauri path only: Tauri v2 platform prerequisites (on Debian-family Linux, `libwebkit2gtk-4.1-dev`)
 
 Chrome 148 is intentional: the extension opts into structured-clone messaging so a `Uint8Array`
 can be copied from the content script to the MV3 worker without converting the file to base64 in
@@ -78,6 +78,10 @@ The launcher discovers compatible Playwright/Puppeteer browser caches or accepts
 installation uses a persistent user service. For a quick dependency-light check of the identical
 scanner/protocol core, use `./run-demo.sh`; that variant substitutes the standalone Rust daemon for
 the assessed Tauri executable.
+
+On macOS, `./run-macos.sh` is a small wrapper that finds Chrome for Testing or Chromium in the
+standard application and Playwright-cache paths, checks version 148+, then delegates to
+`run-demo.sh` and its pinned pnpm selection. Set `DEMO_CHROME_BIN` to override discovery.
 
 Because Chrome resolves user-level Native Messaging hosts relative to an overridden user-data
 directory, the launcher installs a pinned host manifest inside its disposable profile. Manual setup
@@ -139,14 +143,19 @@ path plus the exact extension origin to:
 ~/.config/google-chrome/NativeMessagingHosts/com.secureintent.shadow.json
 ```
 
-Chromium uses `~/.config/chromium/NativeMessagingHosts/`. macOS and Windows use different
-registration locations; this take-home's tested path is Google Chrome on Linux.
+Chromium uses `~/.config/chromium/NativeMessagingHosts/` on Linux. On macOS, Google Chrome uses
+`~/Library/Application Support/Google/Chrome/NativeMessagingHosts/`, Chrome for Testing uses
+`~/Library/Application Support/Google/Chrome for Testing/NativeMessagingHosts/`, and Chromium uses
+`~/Library/Application Support/Chromium/NativeMessagingHosts/`.
 
-It also writes and enables
-`~/.config/systemd/user/com.secureintent.shadow.service`. The service owns either
-`secureintent-shadow-tauri` or `secureintent-shadow-daemon`, which listens at
-`$XDG_RUNTIME_DIR/secureintent-shadow/daemon.sock`. The runtime directory is `0700`, the socket is
-`0600`, and both sides verify Linux peer credentials.
+On Linux it writes and enables
+`~/.config/systemd/user/com.secureintent.shadow.service`; on macOS it atomically writes
+`~/Library/LaunchAgents/com.secureintent.shadow.plist` (mode `0600`) and bootstraps it with
+`launchctl`. The service owns either `secureintent-shadow-tauri` or
+`secureintent-shadow-daemon`, which listens at `$XDG_RUNTIME_DIR/secureintent-shadow/daemon.sock`
+on Linux or `~/Library/Caches/secureintent-shadow/daemon.sock` on macOS. The runtime directory is `0700`, the socket is
+`0600`, and both sides verify same-user peer credentials (`SO_PEERCRED` on Linux and `getpeereid`
+on macOS).
 
 The registration is written atomically with mode `0600`, pins one exact extension origin, and is
 validated after installation. Diagnose or remove the complete broker/service registration with:
@@ -198,7 +207,7 @@ policy parsing and enforcement, native-client failures and timeouts, synchronous
 stale responses, removed inputs, drop routing, DOM metadata minimization, and `FileList`
 reconstruction. A reviewer does not need GTK or WebKit to run the default equivalent daemon core.
 
-The last verified local run completed 29 Rust unit tests, 25 extension unit tests, and 6 real-browser
+The last verified local run completed 28 Rust unit tests, 34 extension unit tests, and 7 real-browser
 tests. The Tauri lifecycle smoke also proved that one PID survives malformed IPC and three separate
 Native Messaging broker sessions.
 
@@ -223,7 +232,7 @@ SHADOW_DAEMON_BINARY=daemon/target/release/secureintent-shadow-tauri \
 The ordinary `./run-demo.sh` intentionally remains dependency-light. CI separately builds the
 Tauri executable and runs both lifecycle smoke tests and the full Chromium suite under a virtual
 display. In both variants Chrome launches only `secureintent-shadow-host`; disconnecting it never
-terminates the daemon. Persistent installation is owned by the systemd user service. No tray or UI
+terminates the daemon. Persistent installation is owned by systemd on Linux or launchd on macOS. No tray or UI
 is needed for Part 1.
 
 ## Why Native Messaging plus AF_UNIX, not localhost WebSockets
@@ -287,7 +296,7 @@ Invalid policy objects are rejected atomically. The maximum bound cannot exceed 
 
 ## Deliberate limits
 
-- Google Chrome 148+ on Linux is the supported demo platform.
+- Chrome for Testing or Chromium 148+ on Linux or macOS is supported by the disposable demo launcher.
 - One file is scanned per picker/drop interaction.
 - Files larger than the configured bound are allowed or blocked according to policy; they are never
   sent to the broker or daemon.
@@ -295,10 +304,10 @@ Invalid policy objects are rejected atomically. The maximum bound cannot exceed 
   access-key-shaped `AKIA`/`ASIA` identifiers. It is intentionally not a production entropy/parser
   engine.
 - The page is a local prop. No ChatGPT, Claude, SaaS, cloud, account, or telemetry integration exists.
-- The detached Tauri daemon is Linux-only in this slice and has no window, tray, updater, settings,
+- The detached Tauri daemon has no window, tray, updater, settings,
   capabilities, or frontend.
 - The repository builds a Tauri executable and installs it as a user service; signed Tauri bundles,
-  Chrome Web Store packaging, macOS/Windows registration, and automatic updates are later product
+  Chrome Web Store packaging, Windows registration, and automatic updates are later product
   phases.
 
 ## Two-minute Loom shot list
@@ -312,8 +321,8 @@ and size. Explain that a new `FileList` proves the original page flow resumed.
 **0:35–1:00 — Block.** Drop `block.pem`. Show the closed-shadow warning and Forge's
 **Blocked — not sent** state. Open Network briefly: no cloud scan occurred.
 
-**1:00–1:25 — The bridge.** Show the broker manifest's pinned `allowed_origins`, the active systemd
-service/PID, the `0600` Unix socket, then `scan.rs` and the zeroizing session allocation.
+**1:00–1:25 — The bridge.** Show the broker manifest's pinned `allowed_origins`, the active
+systemd/launchd service PID, the `0600` Unix socket, then `scan.rs` and the zeroizing session allocation.
 
 **1:25–1:45 — Limits and lifecycle.** Drop `oversized-8mb.txt` to show fail-closed size handling,
 then show `node scripts/smoke-detached.mjs` reporting that one daemon PID survived three broker exits.
